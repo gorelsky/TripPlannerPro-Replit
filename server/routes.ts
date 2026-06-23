@@ -1,0 +1,2232 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "crypto";
+import { storage } from "./storage";
+import { 
+  insertUserSchema, 
+  insertCitySchema, 
+  insertTripSchema, 
+  insertApprovalSchema,
+  insertRouteSchema,
+  insertDailyAllowanceSchema,
+  insertHolidaySchema,
+  type TripStatus 
+} from "@shared/schema";
+import { sendEmail, generateCredentialEmail, generateContactAdminEmail } from "./email-service";
+import { generateRandomPassword, validatePassword } from "./password-utils";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
+  if (!fs.existsSync(attachmentsDir)) {
+    fs.mkdirSync(attachmentsDir, { recursive: true });
+  }
+  app.use("/uploads/contact-screenshots", (req, res, next) => {
+    const fileName = decodeURIComponent(req.path).replace(/^\/+/, "");
+    const filePath = path.join(attachmentsDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    return res.sendFile(filePath);
+  });
+  async function readMultipartFields(req: any): Promise<{ subject?: string; message?: string; attachment?: { filename?: string; mimetype?: string; buffer?: Buffer } | null }> {
+    const contentType = req.headers["content-type"] || "";
+    const match = /boundary=([^;]+)/i.exec(contentType);
+    if (!match) return {};
+    const boundary = `--${match[1]}`;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const body = Buffer.concat(chunks);
+    const parts = body.toString("binary").split(boundary).slice(1, -1);
+    const result: { subject?: string; message?: string; attachment?: { filename?: string; mimetype?: string; buffer?: Buffer } | null } = {};
+    for (const part of parts) {
+      const headerEnd = part.indexOf("\r\n\r\n");
+      if (headerEnd === -1) continue;
+      const headers = part.slice(0, headerEnd);
+      const nameMatch = /name="([^"]+)"/i.exec(headers);
+      if (!nameMatch) continue;
+      const fieldName = nameMatch[1];
+      const value = part.slice(headerEnd + 4, part.lastIndexOf("\r\n"));
+      if (fieldName === "subject") result.subject = Buffer.from(value, "binary").toString("utf8");
+      if (fieldName === "message") result.message = Buffer.from(value, "binary").toString("utf8");
+      if (fieldName === "attachment") {
+        const fileNameMatch = /filename="([^"]*)"/i.exec(headers);
+        const typeMatch = /content-type:\s*([^\r\n]+)/i.exec(headers);
+        result.attachment = {
+          filename: fileNameMatch?.[1],
+          mimetype: typeMatch?.[1],
+          buffer: Buffer.from(value, "binary"),
+        };
+      }
+    }
+    return result;
+  }
+
+  function cleanupOldAttachments() {
+    const cutoff = Date.now() - 10 * 24 * 60 * 60 * 1000;
+    for (const name of fs.readdirSync(attachmentsDir)) {
+      const filePath = path.join(attachmentsDir, name);
+      const stat = fs.statSync(filePath);
+      if (stat.mtimeMs < cutoff) fs.rmSync(filePath, { force: true });
+    }
+  }
+
+  function attachmentUrl(filename: string) {
+    return `/uploads/contact-screenshots/${filename}`;
+  }
+
+  // ============ AUTH ============
+  
+  // Login
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      console.log("[AUTH] Login attempt received");
+      const { email, password } = req.body;
+      console.log(`[AUTH] Email: ${email}, Password length: ${password?.length || 0}`);
+      
+      if (!email || !password) {
+        console.error("[AUTH] Missing email or password");
+        return res.status(400).json({ error: "Email and password required" });
+      }
+
+      const user = await storage.validatePassword(email, password);
+      if (!user) {
+        console.error(`[AUTH] Login failed for ${email} - invalid credentials`);
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      req.session.userId = user.id;
+      console.log(`[AUTH] Session userId set to: ${user.id}, sessionID: ${req.sessionID}`);
+      console.log(`[AUTH] Setting cookie with path: ${req.session.cookie.path}, secure: ${req.session.cookie.secure}, httpOnly: ${req.session.cookie.httpOnly}`);
+      const { password: _, ...userWithoutPassword } = user;
+      console.log(`[AUTH] User logged in: ${email}`);
+      
+      // Save session to ensure it persists
+      req.session.save((err) => {
+        if (err) {
+          console.error("[AUTH] Session save error:", err);
+          return res.status(500).json({ error: "Session save failed" });
+        }
+        console.log(`[AUTH] Session saved successfully, sessionID: ${req.sessionID}`);
+        // Also return sessionId for clients that can't store cookies (iframe environments)
+        res.json({ ...userWithoutPassword, sessionId: req.sessionID });
+      });
+    } catch (error) {
+      console.error("[AUTH] Login error:", error);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  // Logout
+  app.post("/api/auth/logout", async (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.json({ success: true });
+    });
+  });
+
+  // Get session
+  app.get("/api/auth/session", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const user = await storage.getUser(req.session.userId);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ error: "Session check failed" });
+    }
+  });
+
+  // Switch user (admin only for testing)
+  app.post("/api/auth/switch-user", async (req, res) => {
+    try {
+      console.log(`[AUTH] Switch user request: sessionId=${req.sessionID}, userId=${req.session?.userId}`);
+      
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID required" });
+      }
+
+      // Check if current user is admin
+      if (!req.session?.userId) {
+        console.log("[AUTH] Switch user BLOCKED: No session userId");
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const adminUser = await storage.getUser(req.session.userId);
+      console.log(`[AUTH] Admin check: adminUser=${adminUser?.email}, role=${adminUser?.role}`);
+      
+      if (!adminUser || adminUser.role !== "admin") {
+        return res.status(403).json({ error: "Only administrators can switch users" });
+      }
+
+      // Get the target user
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Switch session to target user
+      req.session.userId = userId;
+      const { password: _, ...userWithoutPassword } = targetUser;
+      console.log(`[AUTH] Admin switched to user: ${targetUser.email}`);
+      
+      // CRITICAL: Save session to ensure Set-Cookie header is sent
+      req.session.save((err) => {
+        if (err) {
+          console.error("[AUTH] Switch user session save error:", err);
+          return res.status(500).json({ error: "Session save failed" });
+        }
+        console.log(`[AUTH] Session saved successfully for userId=${userId}`);
+        res.json(userWithoutPassword);
+      });
+    } catch (error) {
+      console.error("[AUTH] Switch user error:", error);
+      res.status(500).json({ error: "Switch user failed" });
+    }
+  });
+
+  // ============ USERS ============
+  
+  // Get all users (role-aware: each role sees only their scope)
+  app.get("/api/users", async (req, res) => {
+    try {
+      const { department } = req.query;
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      let users;
+
+      // Helper: dedupe by id
+      const deduped = (arr: typeof users) =>
+        [...new Map((arr as any[]).map(u => [u.id, u])).values()];
+
+      if (!currentUser) {
+        // Unauthenticated — return empty
+        return res.json([]);
+      }
+
+      const role = currentUser.role;
+      const utype = currentUser.userType;
+
+      if (role === "admin" || role === "ceo") {
+        // Full visibility
+        users = await storage.getAllUsers();
+
+      } else if (role === "territorial_manager") {
+        // ТМ: себя + прямые подчинённые (МП) + менеджер (для отображения имени)
+        const subordinates = await storage.getUsersByManager(currentUser.id);
+        const base = subordinates.some(u => u.id === currentUser.id)
+          ? subordinates
+          : [currentUser, ...subordinates];
+        if (currentUser.managerId && !base.some(u => u.id === currentUser.managerId)) {
+          const mgr = await storage.getUser(currentUser.managerId);
+          users = mgr ? [...base, mgr] : base;
+        } else {
+          users = base;
+        }
+
+      } else if (utype === "manager") {
+        // Руководитель отдела (директор, зам. директора и т.п.):
+        // Себя + прямые подчинённые + подчинённые подчинённых (2 уровня → охватывает ТМ → МП)
+        const directSubs = await storage.getUsersByManager(currentUser.id);
+        const level2: typeof directSubs = [];
+        for (const sub of directSubs) {
+          const subSubs = await storage.getUsersByManager(sub.id);
+          level2.push(...subSubs);
+        }
+        users = deduped([currentUser, ...directSubs, ...level2]);
+
+      } else if (utype === "employee" && currentUser.managerId) {
+        // Рядовой сотрудник (МП и т.п.):
+        // Себя + менеджер + коллеги (сотрудники с тем же manager_id)
+        const siblings = await storage.getUsersByManager(currentUser.managerId);
+        const mgr = await storage.getUser(currentUser.managerId);
+        const base = mgr ? [mgr, ...siblings] : [...siblings];
+        users = deduped(base.some(u => u.id === currentUser.id) ? base : [...base, currentUser]);
+
+      } else if (department) {
+        users = await storage.getUsersByDepartment(department as string);
+
+      } else {
+        users = await storage.getAllUsers();
+      }
+
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Get user by ID
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  // Middleware to check if user is admin
+  const requireAdmin = async (req: any, res: any, next: any) => {
+    try {
+      console.log(`[AUTH] requireAdmin check - session.userId: ${req.session.userId}, session.id: ${req.sessionID}`);
+      
+      if (!req.session.userId) {
+        console.log(`[AUTH] BLOCKED: No session.userId found`);
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const user = await storage.getUser(req.session.userId);
+      if (!user || user.role !== "admin") {
+        console.log(`[AUTH] BLOCKED: User not found or not admin`);
+        return res.status(403).json({ error: "Only administrators can manage users" });
+      }
+
+      console.log(`[AUTH] PASSED: Admin user verified`);
+      next();
+    } catch (error) {
+      console.error("[AUTH] Permission check error:", error);
+      res.status(500).json({ error: "Permission check failed" });
+    }
+  };
+
+  // Clear non-admin users before loading new file (admin only)
+  app.post("/api/users/clear-old", requireAdmin, async (req, res) => {
+    try {
+      await storage.clearNonAdminUsers();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to clear users" });
+    }
+  });
+
+  // Create or update user (UPSERT on email) - admin only
+  app.post("/api/users", requireAdmin, async (req, res) => {
+    try {
+      console.log("[USERS] Create/Update user request:", JSON.stringify(req.body));
+      const data = insertUserSchema.parse(req.body);
+      const { user, password } = await storage.upsertUser(data);
+      console.log("[USERS] User created successfully:", user.id);
+      res.status(201).json({ user, password });
+    } catch (error: any) {
+      console.error("[USERS] Error creating user:", error);
+      res.status(400).json({ error: error.message || "Failed to create user" });
+    }
+  });
+
+  // Update user (admin only)
+  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const data = insertUserSchema.partial().parse(req.body);
+      const user = await storage.updateUser(req.params.id, data);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update user" });
+    }
+  });
+
+  // Delete user (admin only)
+  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const success = await storage.deleteUser(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // ============ CITIES ============
+  
+  // Get all cities
+  app.get("/api/cities", async (req, res) => {
+    try {
+      const cities = await storage.getAllCities();
+      cities.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      res.json(cities);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch cities" });
+    }
+  });
+
+  // Get city by ID
+  app.get("/api/cities/:id", async (req, res) => {
+    try {
+      const city = await storage.getCity(req.params.id);
+      if (!city) {
+        return res.status(404).json({ error: "City not found" });
+      }
+      res.json(city);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch city" });
+    }
+  });
+
+  // Create city
+  app.post("/api/cities", async (req, res) => {
+    try {
+      const data = insertCitySchema.parse(req.body);
+      
+      // Check for duplicate
+      const existing = await storage.getCityByName(data.name);
+      if (existing) {
+        return res.status(409).json({ error: "City with this name already exists" });
+      }
+      
+      const city = await storage.createCity(data);
+      res.status(201).json(city);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create city" });
+    }
+  });
+
+  // Update city
+  app.patch("/api/cities/:id", async (req, res) => {
+    try {
+      const data = insertCitySchema.partial().parse(req.body);
+      const city = await storage.updateCity(req.params.id, data);
+      if (!city) {
+        return res.status(404).json({ error: "City not found" });
+      }
+      res.json(city);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update city" });
+    }
+  });
+
+  // Delete city
+  app.delete("/api/cities/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteCity(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "City not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete city" });
+    }
+  });
+
+  // ============ TRIPS ============
+  
+  // Get all trips (with optional filters)
+  app.get("/api/trips", async (req, res) => {
+    try {
+      const { employeeId, status, cityId, department } = req.query;
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      
+      let trips;
+
+      // Session-based role check FIRST — prevents TM from seeing the whole department
+      if (currentUser?.role === "territorial_manager") {
+        // ТМ видит только свои поездки + прямых подчинённых (не весь отдел)
+        const ownTrips = await storage.getTripsByEmployee(currentUser.id);
+        const subordinateTrips = await storage.getTripsByManagerSubordinates(currentUser.id);
+        const approvalTrips = await storage.getTripsForApproval(currentUser.id);
+        const tripMap = new Map<string, any>();
+        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+        trips = Array.from(tripMap.values());
+      } else if (employeeId) {
+        trips = await storage.getTripsByEmployee(employeeId as string);
+      } else if (status) {
+        trips = await storage.getTripsByStatus(status as TripStatus);
+      } else if (cityId) {
+        trips = await storage.getTripsByCity(cityId as string);
+      } else if (department) {
+        trips = await storage.getTripsByDepartment(department as string);
+      } else if (currentUser) {
+        const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
+        if (elevatedRoles.includes(currentUser.role || "")) {
+          trips = await storage.getAllTrips();
+        } else if (currentUser.userType === "manager" && currentUser.id) {
+          const ownTrips = await storage.getTripsByEmployee(currentUser.id);
+          // Директора отдела и другие менеджеры видят весь отдел
+          const subordinateTrips = await storage.getTripsByDepartment(currentUser.department || "");
+          const approvalTrips = await storage.getTripsForApproval(currentUser.id);
+          const tripMap = new Map<string, any>();
+          [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+          trips = Array.from(tripMap.values());
+        } else if (currentUser.department) {
+          trips = await storage.getTripsByDepartment(currentUser.department);
+        } else {
+          trips = await storage.getTripsByEmployee(currentUser.id);
+        }
+      } else {
+        trips = await storage.getAllTrips();
+      }
+      
+      // Enrich with details
+      const tripsWithDetails = await Promise.all(
+        trips.map(trip => storage.getTripWithDetails(trip.id))
+      );
+      
+      res.json(tripsWithDetails.filter(t => t !== undefined));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trips" });
+    }
+  });
+
+  // Get trip by ID
+  app.get("/api/trips/:id", async (req, res) => {
+    try {
+      const trip = await storage.getTripWithDetails(req.params.id);
+      if (!trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+      res.json(trip);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trip" });
+    }
+  });
+
+  // Create trip
+  app.post("/api/trips", async (req, res) => {
+    try {
+      const data = insertTripSchema.parse(req.body);
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+
+      // Check for overlapping trips
+      const existingTrips = await storage.getTripsByEmployee(data.employeeId);
+      const isOverlapping = existingTrips.some(trip => {
+        // Skip current trip if it's an update (though this is POST)
+        const start = data.startDate;
+        const end = data.endDate;
+        const tripStart = trip.startDate;
+        const tripEnd = trip.endDate;
+
+        // Overlap condition: (StartA <= EndB) and (EndA >= StartB)
+        return (start <= tripEnd) && (end >= tripStart);
+      });
+
+      if (isOverlapping) {
+        return res.status(400).json({ error: "даты командировки пересекаются датой с другой командировкой" });
+      }
+
+      const trip = await storage.createTrip(data);
+      
+      // If status is pending, create approval request
+      if (trip.status === "pending") {
+        const employee = await storage.getUser(trip.employeeId);
+        if (employee) {
+          // Check if current user is the same as the employee
+          const isOwnTrip = currentUser?.id === data.employeeId;
+          
+          if (isOwnTrip && currentUser!.role && ["ceo", "admin"].includes(currentUser!.role)) {
+            // If CEO/Admin creates their OWN trip, approve it immediately
+            await storage.updateTrip(trip.id, { status: "approved" });
+          } else if (employee.role === "deputy_ceo" && !isOwnTrip) {
+            // If someone creates a trip for Deputy CEO (not by deputy_ceo themselves)
+            // Deputy CEO trips go straight to director_approved (awaiting admin/final approval)
+            await storage.updateTrip(trip.id, { status: "director_approved" });
+            
+            // For Deputy CEO, we find an admin to approve
+            const admins = (await storage.getAllUsers()).filter(u => u.role === "admin");
+            if (admins.length > 0) {
+              await storage.createApproval({
+                tripId: trip.id,
+                approverId: admins[0].id,
+                status: "pending",
+              });
+            }
+          } else if (employee.managerId) {
+            // Regular employee trips go to their manager
+            await storage.createApproval({
+              tripId: trip.id,
+              approverId: employee.managerId,
+              status: "pending",
+            });
+          }
+        }
+      }
+      
+      const tripWithDetails = await storage.getTripWithDetails(trip.id);
+      res.status(201).json(tripWithDetails);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create trip" });
+    }
+  });
+
+  // Update trip
+  app.patch("/api/trips/:id", async (req, res) => {
+    try {
+      const data = insertTripSchema.partial().parse(req.body);
+      const trip = await storage.updateTrip(req.params.id, data);
+      if (!trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+      
+      const tripWithDetails = await storage.getTripWithDetails(trip.id);
+      res.json(tripWithDetails);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update trip" });
+    }
+  });
+
+  // Delete trip
+  app.delete("/api/trips/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteTrip(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete trip" });
+    }
+  });
+
+  // Get trips for approval by manager
+  app.get("/api/approvals/pending/:managerId", async (req, res) => {
+    try {
+      const trips = await storage.getTripsForApproval(req.params.managerId);
+      res.json(trips);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trips for approval" });
+    }
+  });
+
+  // ============ APPROVALS ============
+  
+  // Approve or reject trip
+  app.post("/api/approvals/:tripId", async (req, res) => {
+    try {
+      const { tripId } = req.params;
+      const { approverId: bodyApproverId, status, comment } = req.body;
+      
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be 'approved' or 'rejected'" });
+      }
+      
+      // Use current user as approver if approverId not provided
+      const approverId = bodyApproverId || req.session.userId;
+      
+      const trip = await storage.getTrip(tripId);
+      if (!trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+
+      const approver = await storage.getUser(approverId);
+      if (!approver) {
+        return res.status(404).json({ error: "Approver not found" });
+      }
+
+      const employee = await storage.getUser(trip.employeeId);
+      if (!employee) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+
+      // Department-based access control: only managers of same department can approve (except admin/ceo)
+      const isAdmin = approver.role === "admin";
+      const isCeo = approver.role === "ceo";
+      const isDeputyCeo = approver.role === "deputy_ceo";
+      const isManager = approver.userType === "manager";
+      const isTerritorialManager = approver.role === "territorial_manager";
+
+      if (!isAdmin && !isCeo && !isDeputyCeo) {
+        if (!isManager || employee.department !== approver.department) {
+          return res.status(403).json({ error: "Only department managers can approve trips" });
+        }
+        // ТМ может согласовывать только прямых подчинённых (не всего отдела)
+        if (isTerritorialManager && employee.managerId !== approver.id) {
+          return res.status(403).json({ error: "Territorial manager can only approve their direct subordinates" });
+        }
+      }
+
+      let newTripStatus: TripStatus = trip.status;
+
+      if (status === "rejected") {
+        newTripStatus = "rejected";
+      } else if (status === "approved") {
+        if (approver.role && ["ceo", "deputy_ceo", "admin"].includes(approver.role)) {
+          newTripStatus = "approved";
+        } else if (approver.role && ["marketing_director", "sales_director", "commerce_director"].includes(approver.role)) {
+          newTripStatus = "director_approved";
+        } else if (approver.role && ["territorial_manager", "commercial_manager", "product_manager", "kam"].includes(approver.role)) {
+          newTripStatus = "manager_approved";
+        } else {
+          // Если роль не специфическая, но он является руководителем
+          newTripStatus = "manager_approved";
+        }
+      }
+
+      // Update trip status
+      await storage.updateTrip(tripId, { status: newTripStatus });
+      
+      // Create or update approval record
+      const existingApprovals = await storage.getApprovalsByTrip(tripId);
+      const existingApproval = existingApprovals.find(a => a.approverId === approverId);
+      
+      if (existingApproval) {
+        await storage.updateApproval(existingApproval.id, { status: status as any, comment });
+      } else {
+        await storage.createApproval({
+          tripId,
+          approverId,
+          status: status as any,
+          comment,
+        });
+      }
+      
+      const tripWithDetails = await storage.getTripWithDetails(tripId);
+      res.json(tripWithDetails);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to process approval" });
+    }
+  });
+
+  // Get dashboard stats
+  app.get("/api/stats/dashboard/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const allTrips = await storage.getAllTrips();
+      
+      // Filter trips that the user should see
+      const visibleTrips = await Promise.all(allTrips.map(async (trip) => {
+        const isOwnTrip = trip.employeeId === userId;
+        const isAdmin = user.role === "admin";
+        const isCeoOrDeputy = user.role != null && ["ceo", "deputy_ceo"].includes(user.role);
+        
+        if (isAdmin || isCeoOrDeputy) return trip;
+        if (isOwnTrip) return trip;
+        
+        // Рекурсивная проверка подчиненности
+        const checkSubordinate = async (managerId: string, targetId: string): Promise<boolean> => {
+          const subordinates = await storage.getUsersByManager(managerId);
+          if (subordinates.some(s => s.id === targetId)) return true;
+          for (const s of subordinates) {
+            // Чтобы избежать бесконечной рекурсии и лишних запросов
+            if (await checkSubordinate(s.id, targetId)) return true;
+          }
+          return false;
+        };
+        
+        const isSubordinate = await checkSubordinate(userId, trip.employeeId);
+        if (isSubordinate) return trip;
+        
+        return null;
+      }));
+      
+      const filteredTrips = visibleTrips.filter(t => t !== null && typeof t === 'object') as any[];
+      
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const nowStr = now.toISOString().split('T')[0];
+
+      // Manager specific: trips from subordinates that need approval
+      const tripsForApproval = await storage.getTripsForApproval(userId);
+
+      res.json({
+        totalTrips: filteredTrips.length,
+        pendingTrips: filteredTrips.filter(t => t.status === "pending").length,
+        approvedTrips: filteredTrips.filter(t => t.status === "approved").length,
+        activeTrips: filteredTrips.filter(t => 
+          t.status === "approved" && t.startDate <= nowStr && t.endDate >= nowStr
+        ).length,
+        rejectedTrips: filteredTrips.filter(t => t.status === "rejected").length,
+        pendingApprovals: tripsForApproval.filter(t => ["draft", "pending", "manager_approved", "director_approved"].includes(t.status)).length,
+      });
+    } catch (error) {
+      console.error("[STATS] Dashboard stats error:", error);
+      res.status(500).json({ error: "Failed to fetch stats" });
+    }
+  });
+
+  // ============ ROUTES ============
+  
+  // Get all routes
+  app.get("/api/routes", async (req, res) => {
+    try {
+      const routes = await storage.getAllRoutes();
+      res.json(routes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch routes" });
+    }
+  });
+
+  // Create route (admin only)
+  app.post("/api/routes", requireAdmin, async (req, res) => {
+    try {
+      console.log("[ROUTES] Create route request, userId:", req.session.userId);
+      console.log("[ROUTES] Create route request body:", JSON.stringify(req.body));
+      const { path, distance, cities, kilometers } = req.body;
+      
+      if (!path || !distance || !cities) {
+        return res.status(400).json({ error: "Missing required route fields" });
+      }
+
+      // Ensure cities is an array
+      const citiesArray = Array.isArray(cities) 
+        ? cities 
+        : typeof cities === 'string' 
+          ? cities.split(',').map(c => c.trim())
+          : [];
+
+      const route = await storage.createRoute({
+        path,
+        distance: String(distance),
+        cities: citiesArray,
+        kilometers: String(kilometers || distance.replace(/[^0-9]/g, '')),
+      });
+      
+      console.log("[ROUTES] Route created successfully:", route.id);
+      res.status(201).json(route);
+    } catch (error: any) {
+      console.error("[ROUTES] Error creating route:", error);
+      res.status(400).json({ error: error.message || "Failed to create route" });
+    }
+  });
+
+  // Delete route
+  app.delete("/api/routes/:id", requireAdmin, async (req, res) => {
+    try {
+      const success = await storage.deleteRoute(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete route" });
+    }
+  });
+
+  // Reset all trips (admin only)
+  app.post("/api/admin/reset-trips", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteAllTrips();
+      res.json({ success: true, message: "All trips and approvals have been cleared" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reset trips" });
+    }
+  });
+
+  // ============ REPORTS ============
+  
+  // Helper function to get report data
+  const getReportData = async (month: number, year: number) => {
+    // Get all approved trips
+    const allTrips = await storage.getTripsByStatus("approved");
+    
+    // Get daily allowance
+    const allowance = await storage.getDailyAllowance();
+    const amountPerNight = parseInt(allowance?.amountPerNight || "1700");
+    
+    // Filter trips by month/year
+    const tripsInMonth = await Promise.all(
+      allTrips
+        .filter(trip => {
+          const startDate = new Date(trip.startDate);
+          return startDate.getMonth() + 1 === month && startDate.getFullYear() === year;
+        })
+        .map(async (trip) => {
+          const details = await storage.getTripWithDetails(trip.id);
+          if (!details) return null;
+          
+          const startDate = new Date(trip.startDate);
+          const endDate = new Date(trip.endDate);
+          const nights = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+          const totalAllowance = nights > 0 ? nights * amountPerNight : 0;
+          
+          return {
+            ...details,
+            nights,
+            totalAllowance,
+          };
+        })
+    );
+    
+    const validTrips = tripsInMonth.filter(t => t !== null);
+    
+    // Split into two groups
+    const withAllowance = validTrips.filter(t => t!.totalAllowance > 0);
+    const withoutAllowance = validTrips.filter(t => t!.totalAllowance === 0);
+
+    const totalWithAllowance = withAllowance.reduce((sum, t) => sum + (t!.totalAllowance || 0), 0);
+    const totalWithoutAllowance = withoutAllowance.reduce((sum, t) => sum + (t!.totalAllowance || 0), 0);
+    const grandTotal = totalWithAllowance + totalWithoutAllowance;
+
+    return {
+      month,
+      year,
+      amountPerNight,
+      withAllowance: withAllowance.map((t, idx) => ({ ...t, number: idx + 1 })),
+      withoutAllowance: withoutAllowance.map((t, idx) => ({ ...t, number: withAllowance.length + idx + 1 })),
+      totalWithAllowance,
+      totalWithoutAllowance,
+      grandTotal,
+    };
+  };
+
+  // Get trips report for month (with daily allowance calculation)
+  app.get("/api/admin/trips-report", requireAdmin, async (req, res) => {
+    try {
+      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
+      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      
+      const data = await getReportData(month, year);
+      res.json(data);
+    } catch (error) {
+      console.error("Report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  // Export trips report to Excel
+  app.get("/api/admin/trips-report/export", requireAdmin, async (req, res) => {
+    try {
+      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
+      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      
+      console.log(`[EXPORT] Request received - session.userId: ${req.session.userId}, sessionID: ${req.sessionID}`);
+      console.log(`[EXPORT] Exporting report for month=${month}, year=${year}`);
+      const data = await getReportData(month, year);
+      console.log(`[EXPORT] Report data ready: ${data.withAllowance.length} with allowance, ${data.withoutAllowance.length} without`);
+      
+      // Dynamically import ExcelJS
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Реестр командировок");
+      
+      const monthNames = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+      
+      // Title
+      const titleRow = worksheet.addRow([
+        `Реестр командировок на ${monthNames[month]} ${year} г.`,
+      ]);
+      titleRow.font = { bold: true, size: 14 };
+      worksheet.mergeCells("A1:H1");
+      
+      // Empty row
+      worksheet.addRow([]);
+      
+      // Header
+      const headers = [
+        "№ п/п",
+        "ФИО",
+        "Отдел",
+        "Срок командировки",
+        "Город проживания - Город командировки - Город проживания",
+        "Транспорт",
+        "Ночей",
+        "Итог суточные, руб.",
+      ];
+      
+      const headerRow = worksheet.addRow(headers);
+      headerRow.font = { bold: true };
+      headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
+      
+      // Add "with allowance" trips
+      if (data.withAllowance && data.withAllowance.length > 0) {
+        worksheet.addRow([]);
+        worksheet.addRow(["Командировки с суточными"]);
+        
+        data.withAllowance.forEach((trip) => {
+          const startDate = new Date(trip.startDate);
+          const endDate = new Date(trip.endDate);
+          const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
+          const routePath = trip.route?.path || "-";
+          const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
+
+          worksheet.addRow([
+            trip.number,
+            trip.employee?.fullName || "-",
+            trip.employee?.department || "-",
+            tripDates,
+            routePath,
+            transportMap[trip.transportType] || trip.transportType,
+            trip.nights,
+            trip.totalAllowance,
+          ]);
+        });
+
+        // Subtotal for with allowance
+        const subtotalWithRow = worksheet.addRow(["", "", "", "", "", "", "Итого по суточным:", data.totalWithAllowance]);
+        subtotalWithRow.font = { bold: true };
+        subtotalWithRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
+      }
+
+      // Empty row
+      worksheet.addRow([]);
+
+      // Add "without allowance" trips
+      if (data.withoutAllowance && data.withoutAllowance.length > 0) {
+        const sectionRow = worksheet.addRow(["Командировки без суточных"]);
+        sectionRow.font = { bold: true };
+
+        data.withoutAllowance.forEach((trip) => {
+          const startDate = new Date(trip.startDate);
+          const endDate = new Date(trip.endDate);
+          const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
+          const routePath = trip.route?.path || "-";
+          const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
+
+          worksheet.addRow([
+            trip.number,
+            trip.employee?.fullName || "-",
+            trip.employee?.department || "-",
+            tripDates,
+            routePath,
+            transportMap[trip.transportType] || trip.transportType,
+            trip.nights,
+            trip.totalAllowance || 0,
+          ]);
+        });
+
+        // Subtotal for without allowance
+        const subtotalWithoutRow = worksheet.addRow(["", "", "", "", "", "", "Итого по без суточных:", data.totalWithoutAllowance]);
+        subtotalWithoutRow.font = { bold: true };
+        subtotalWithoutRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
+      }
+
+      // Empty row before grand total
+      worksheet.addRow([]);
+
+      // Grand total
+      if ((data.withAllowance && data.withAllowance.length > 0) || (data.withoutAllowance && data.withoutAllowance.length > 0)) {
+        const grandTotalRow = worksheet.addRow(["", "", "", "", "", "", "ОБЩИЙ ИТОГ:", data.grandTotal]);
+        grandTotalRow.font = { bold: true, size: 12 };
+        grandTotalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
+      }
+
+      // Adjust column widths
+      worksheet.columns = [
+        { width: 8 },
+        { width: 25 },
+        { width: 15 },
+        { width: 25 },
+        { width: 45 },
+        { width: 12 },
+        { width: 8 },
+        { width: 15 },
+      ];
+      
+      // Generate buffer
+      const buffer = await workbook.xlsx.writeBuffer() as Buffer;
+      console.log(`[EXPORT] Buffer generated, size: ${buffer.length} bytes`);
+      
+      // Send file
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      const encodedFileName = encodeURIComponent(`Реестр_командировок_${monthNames[month]}_${year}.xlsx`);
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodedFileName}`);
+      console.log(`[EXPORT] Sending file: ${encodedFileName}`);
+      res.send(buffer);
+    } catch (error) {
+      console.error("Export error:", error);
+      res.status(500).json({ error: "Failed to export report" });
+    }
+  });
+
+  // ============ DAILY ALLOWANCE ============
+  
+  app.get("/api/daily-allowance", async (_req, res) => {
+    try {
+      const allowance = await storage.getDailyAllowance();
+      if (!allowance) {
+        // Return default if not set
+        return res.json({ amountPerNight: "1700" });
+      }
+      res.json(allowance);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch daily allowance" });
+    }
+  });
+
+  app.post("/api/daily-allowance", requireAdmin, async (req, res) => {
+    try {
+      const parsed = insertDailyAllowanceSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid daily allowance data" });
+      }
+      const allowance = await storage.updateDailyAllowance(parsed.data.amountPerNight);
+      res.json(allowance);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update daily allowance" });
+    }
+  });
+
+  // ============ HOLIDAYS ============
+
+  app.get("/api/holidays", async (_req, res) => {
+    try {
+      const holidays = await storage.getAllHolidays();
+      res.json(holidays);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch holidays" });
+    }
+  });
+
+  app.post("/api/holidays", requireAdmin, async (req, res) => {
+    try {
+      const parsed = insertHolidaySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid holiday data" });
+      }
+      const holiday = await storage.createHoliday(parsed.data);
+      res.status(201).json(holiday);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create holiday" });
+    }
+  });
+
+  app.patch("/api/holidays/:id", requireAdmin, async (req, res) => {
+    try {
+      const parsed = insertHolidaySchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid holiday data" });
+      }
+      const holiday = await storage.updateHoliday(req.params.id, parsed.data);
+      if (!holiday) {
+        return res.status(404).json({ error: "Holiday not found" });
+      }
+      res.json(holiday);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update holiday" });
+    }
+  });
+
+  app.delete("/api/holidays/:id", requireAdmin, async (req, res) => {
+    try {
+      const success = await storage.deleteHoliday(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Holiday not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete holiday" });
+    }
+  });
+
+  // ============ USER ACCOUNT ENDPOINTS ============
+
+  // Change password
+  app.patch("/api/auth/change-password", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Current and new password required" });
+      }
+
+      const user = await storage.getUser(req.session.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Verify current password
+      const validated = await storage.validatePassword(user.email, currentPassword);
+      if (!validated) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      // Validate new password
+      const validation = validatePassword(newPassword);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.errors.join(", ") });
+      }
+
+      // Update password
+      await storage.updateUser(user.id, { password: newPassword } as any);
+      res.json({ success: true, message: "Password changed successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to change password" });
+    }
+  });
+
+  // Switch user (admin only for testing)
+  app.post("/api/auth/switch-user", async (req, res) => {
+    try {
+      console.log(`[AUTH] Switch user request: sessionId=${req.sessionID}, userId=${req.session?.userId}`);
+      
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID required" });
+      }
+
+      // Check if current user is admin
+      if (!req.session?.userId) {
+        console.log("[AUTH] Switch user BLOCKED: No session userId");
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const adminUser = await storage.getUser(req.session.userId);
+      console.log(`[AUTH] Admin check: adminUser=${adminUser?.email}, role=${adminUser?.role}`);
+      
+      if (!adminUser || adminUser.role !== "admin") {
+        return res.status(403).json({ error: "Only administrators can switch users" });
+      }
+
+      // Get the target user
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Switch session to target user
+      req.session.userId = userId;
+      const { password: _, ...userWithoutPassword } = targetUser;
+      console.log(`[AUTH] Admin switched to user: ${targetUser.email}`);
+      
+      // CRITICAL: Save session to ensure Set-Cookie header is sent
+      req.session.save((err) => {
+        if (err) {
+          console.error("[AUTH] Switch user session save error:", err);
+          return res.status(500).json({ error: "Session save failed" });
+        }
+        console.log(`[AUTH] Session saved successfully for userId=${userId}`);
+        res.json(userWithoutPassword);
+      });
+    } catch (error) {
+      console.error("[AUTH] Switch user error:", error);
+      res.status(500).json({ error: "Switch user failed" });
+    }
+  });
+
+  // ============ USERS ============
+  
+  // Get all users (role-aware: each role sees only their scope)
+  app.get("/api/users", async (req, res) => {
+    try {
+      const { department } = req.query;
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      let users;
+
+      // Helper: dedupe by id
+      const deduped = (arr: typeof users) =>
+        [...new Map((arr as any[]).map(u => [u.id, u])).values()];
+
+      if (!currentUser) {
+        // Unauthenticated — return empty
+        return res.json([]);
+      }
+
+      const role = currentUser.role;
+      const utype = currentUser.userType;
+
+      if (role === "admin" || role === "ceo") {
+        // Full visibility
+        users = await storage.getAllUsers();
+
+      } else if (role === "territorial_manager") {
+        // ТМ: себя + прямые подчинённые (МП) + менеджер (для отображения имени)
+        const subordinates = await storage.getUsersByManager(currentUser.id);
+        const base = subordinates.some(u => u.id === currentUser.id)
+          ? subordinates
+          : [currentUser, ...subordinates];
+        if (currentUser.managerId && !base.some(u => u.id === currentUser.managerId)) {
+          const mgr = await storage.getUser(currentUser.managerId);
+          users = mgr ? [...base, mgr] : base;
+        } else {
+          users = base;
+        }
+
+      } else if (utype === "manager") {
+        // Руководитель отдела (директор, зам. директора и т.п.):
+        // Себя + прямые подчинённые + подчинённые подчинённых (2 уровня → охватывает ТМ → МП)
+        const directSubs = await storage.getUsersByManager(currentUser.id);
+        const level2: typeof directSubs = [];
+        for (const sub of directSubs) {
+          const subSubs = await storage.getUsersByManager(sub.id);
+          level2.push(...subSubs);
+        }
+        users = deduped([currentUser, ...directSubs, ...level2]);
+
+      } else if (utype === "employee" && currentUser.managerId) {
+        // Рядовой сотрудник (МП и т.п.):
+        // Себя + менеджер + коллеги (сотрудники с тем же manager_id)
+        const siblings = await storage.getUsersByManager(currentUser.managerId);
+        const mgr = await storage.getUser(currentUser.managerId);
+        const base = mgr ? [mgr, ...siblings] : [...siblings];
+        users = deduped(base.some(u => u.id === currentUser.id) ? base : [...base, currentUser]);
+
+      } else if (department) {
+        users = await storage.getUsersByDepartment(department as string);
+
+      } else {
+        users = await storage.getAllUsers();
+      }
+
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Get user by ID
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  // Clear non-admin users before loading new file (admin only)
+  app.post("/api/users/clear-old", requireAdmin, async (req, res) => {
+    try {
+      await storage.clearNonAdminUsers();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to clear users" });
+    }
+  });
+
+  // Create or update user (UPSERT on email) - admin only
+  app.post("/api/users", requireAdmin, async (req, res) => {
+    try {
+      console.log("[USERS] Create/Update user request:", JSON.stringify(req.body));
+      const data = insertUserSchema.parse(req.body);
+      const { user, password } = await storage.upsertUser(data);
+      console.log("[USERS] User created successfully:", user.id);
+      res.status(201).json({ user, password });
+    } catch (error: any) {
+      console.error("[USERS] Error creating user:", error);
+      res.status(400).json({ error: error.message || "Failed to create user" });
+    }
+  });
+
+  // Update user (admin only)
+  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const data = insertUserSchema.partial().parse(req.body);
+      const user = await storage.updateUser(req.params.id, data);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update user" });
+    }
+  });
+
+  // Delete user (admin only)
+  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const success = await storage.deleteUser(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // ============ CITIES ============
+  
+  // Get all cities
+  app.get("/api/cities", async (req, res) => {
+    try {
+      const cities = await storage.getAllCities();
+      cities.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      res.json(cities);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch cities" });
+    }
+  });
+
+  // Get city by ID
+  app.get("/api/cities/:id", async (req, res) => {
+    try {
+      const city = await storage.getCity(req.params.id);
+      if (!city) {
+        return res.status(404).json({ error: "City not found" });
+      }
+      res.json(city);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch city" });
+    }
+  });
+
+  // Create city
+  app.post("/api/cities", async (req, res) => {
+    try {
+      const data = insertCitySchema.parse(req.body);
+      
+      // Check for duplicate
+      const existing = await storage.getCityByName(data.name);
+      if (existing) {
+        return res.status(409).json({ error: "City with this name already exists" });
+      }
+      
+      const city = await storage.createCity(data);
+      res.status(201).json(city);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create city" });
+    }
+  });
+
+  // Update city
+  app.patch("/api/cities/:id", async (req, res) => {
+    try {
+      const data = insertCitySchema.partial().parse(req.body);
+      const city = await storage.updateCity(req.params.id, data);
+      if (!city) {
+        return res.status(404).json({ error: "City not found" });
+      }
+      res.json(city);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update city" });
+    }
+  });
+
+  // Delete city
+  app.delete("/api/cities/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteCity(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "City not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete city" });
+    }
+  });
+
+  // ============ TRIPS ============
+  
+  // Get all trips (with optional filters)
+  app.get("/api/trips", async (req, res) => {
+    try {
+      const { employeeId, status, cityId, department } = req.query;
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      
+      let trips;
+
+      // Session-based role check FIRST — prevents TM from seeing the whole department
+      if (currentUser?.role === "territorial_manager") {
+        // ТМ видит только свои поездки + прямых подчинённых (не весь отдел)
+        const ownTrips = await storage.getTripsByEmployee(currentUser.id);
+        const subordinateTrips = await storage.getTripsByManagerSubordinates(currentUser.id);
+        const approvalTrips = await storage.getTripsForApproval(currentUser.id);
+        const tripMap = new Map<string, any>();
+        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+        trips = Array.from(tripMap.values());
+      } else if (employeeId) {
+        trips = await storage.getTripsByEmployee(employeeId as string);
+      } else if (status) {
+        trips = await storage.getTripsByStatus(status as TripStatus);
+      } else if (cityId) {
+        trips = await storage.getTripsByCity(cityId as string);
+      } else if (department) {
+        trips = await storage.getTripsByDepartment(department as string);
+      } else if (currentUser) {
+        const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
+        if (elevatedRoles.includes(currentUser.role || "")) {
+          trips = await storage.getAllTrips();
+        } else if (currentUser.userType === "manager" && currentUser.id) {
+          const ownTrips = await storage.getTripsByEmployee(currentUser.id);
+          // Директора отдела и другие менеджеры видят весь отдел
+          const subordinateTrips = await storage.getTripsByDepartment(currentUser.department || "");
+          const approvalTrips = await storage.getTripsForApproval(currentUser.id);
+          const tripMap = new Map<string, any>();
+          [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+          trips = Array.from(tripMap.values());
+        } else if (currentUser.department) {
+          trips = await storage.getTripsByDepartment(currentUser.department);
+        } else {
+          trips = await storage.getTripsByEmployee(currentUser.id);
+        }
+      } else {
+        trips = await storage.getAllTrips();
+      }
+      
+      // Enrich with details
+      const tripsWithDetails = await Promise.all(
+        trips.map(trip => storage.getTripWithDetails(trip.id))
+      );
+      
+      res.json(tripsWithDetails.filter(t => t !== undefined));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trips" });
+    }
+  });
+
+  // Get trip by ID
+  app.get("/api/trips/:id", async (req, res) => {
+    try {
+      const trip = await storage.getTripWithDetails(req.params.id);
+      if (!trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+      res.json(trip);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trip" });
+    }
+  });
+
+  // Create trip
+  app.post("/api/trips", async (req, res) => {
+    try {
+      const data = insertTripSchema.parse(req.body);
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+
+      // Check for overlapping trips
+      const existingTrips = await storage.getTripsByEmployee(data.employeeId);
+      const isOverlapping = existingTrips.some(trip => {
+        // Skip current trip if it's an update (though this is POST)
+        const start = data.startDate;
+        const end = data.endDate;
+        const tripStart = trip.startDate;
+        const tripEnd = trip.endDate;
+
+        // Overlap condition: (StartA <= EndB) and (EndA >= StartB)
+        return (start <= tripEnd) && (end >= tripStart);
+      });
+
+      if (isOverlapping) {
+        return res.status(400).json({ error: "даты командировки пересекаются датой с другой командировкой" });
+      }
+
+      const trip = await storage.createTrip(data);
+      
+      // If status is pending, create approval request
+      if (trip.status === "pending") {
+        const employee = await storage.getUser(trip.employeeId);
+        if (employee) {
+          // Check if current user is the same as the employee
+          const isOwnTrip = currentUser?.id === data.employeeId;
+          
+          if (isOwnTrip && currentUser!.role && ["ceo", "admin"].includes(currentUser!.role)) {
+            // If CEO/Admin creates their OWN trip, approve it immediately
+            await storage.updateTrip(trip.id, { status: "approved" });
+          } else if (employee.role === "deputy_ceo" && !isOwnTrip) {
+            // If someone creates a trip for Deputy CEO (not by deputy_ceo themselves)
+            // Deputy CEO trips go straight to director_approved (awaiting admin/final approval)
+            await storage.updateTrip(trip.id, { status: "director_approved" });
+            
+            // For Deputy CEO, we find an admin to approve
+            const admins = (await storage.getAllUsers()).filter(u => u.role === "admin");
+            if (admins.length > 0) {
+              await storage.createApproval({
+                tripId: trip.id,
+                approverId: admins[0].id,
+                status: "pending",
+              });
+            }
+          } else if (employee.managerId) {
+            // Regular employee trips go to their manager
+            await storage.createApproval({
+              tripId: trip.id,
+              approverId: employee.managerId,
+              status: "pending",
+            });
+          }
+        }
+      }
+      
+      const tripWithDetails = await storage.getTripWithDetails(trip.id);
+      res.status(201).json(tripWithDetails);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create trip" });
+    }
+  });
+
+  // Update trip
+  app.patch("/api/trips/:id", async (req, res) => {
+    try {
+      const data = insertTripSchema.partial().parse(req.body);
+      const trip = await storage.updateTrip(req.params.id, data);
+      if (!trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+      
+      const tripWithDetails = await storage.getTripWithDetails(trip.id);
+      res.json(tripWithDetails);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update trip" });
+    }
+  });
+
+  // Delete trip
+  app.delete("/api/trips/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteTrip(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete trip" });
+    }
+  });
+
+  // Get trips for approval by manager
+  app.get("/api/approvals/pending/:managerId", async (req, res) => {
+    try {
+      const trips = await storage.getTripsForApproval(req.params.managerId);
+      res.json(trips);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trips for approval" });
+    }
+  });
+
+  // ============ APPROVALS ============
+  
+  // Approve or reject trip
+  app.post("/api/approvals/:tripId", async (req, res) => {
+    try {
+      const { tripId } = req.params;
+      const { approverId: bodyApproverId, status, comment } = req.body;
+      
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be 'approved' or 'rejected'" });
+      }
+      
+      // Use current user as approver if approverId not provided
+      const approverId = bodyApproverId || req.session.userId;
+      
+      const trip = await storage.getTrip(tripId);
+      if (!trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+
+      const approver = await storage.getUser(approverId);
+      if (!approver) {
+        return res.status(404).json({ error: "Approver not found" });
+      }
+
+      const employee = await storage.getUser(trip.employeeId);
+      if (!employee) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+
+      // Department-based access control: only managers of same department can approve (except admin/ceo)
+      const isAdmin = approver.role === "admin";
+      const isCeo = approver.role === "ceo";
+      const isDeputyCeo = approver.role === "deputy_ceo";
+      const isManager = approver.userType === "manager";
+      const isTerritorialManager = approver.role === "territorial_manager";
+
+      if (!isAdmin && !isCeo && !isDeputyCeo) {
+        if (!isManager || employee.department !== approver.department) {
+          return res.status(403).json({ error: "Only department managers can approve trips" });
+        }
+        // ТМ может согласовывать только прямых подчинённых (не всего отдела)
+        if (isTerritorialManager && employee.managerId !== approver.id) {
+          return res.status(403).json({ error: "Territorial manager can only approve their direct subordinates" });
+        }
+      }
+
+      let newTripStatus: TripStatus = trip.status;
+
+      if (status === "rejected") {
+        newTripStatus = "rejected";
+      } else if (status === "approved") {
+        if (approver.role && ["ceo", "deputy_ceo", "admin"].includes(approver.role)) {
+          newTripStatus = "approved";
+        } else if (approver.role && ["marketing_director", "sales_director", "commerce_director"].includes(approver.role)) {
+          newTripStatus = "director_approved";
+        } else if (approver.role && ["territorial_manager", "commercial_manager", "product_manager", "kam"].includes(approver.role)) {
+          newTripStatus = "manager_approved";
+        } else {
+          // Если роль не специфическая, но он является руководителем
+          newTripStatus = "manager_approved";
+        }
+      }
+
+      // Update trip status
+      await storage.updateTrip(tripId, { status: newTripStatus });
+      
+      // Create or update approval record
+      const existingApprovals = await storage.getApprovalsByTrip(tripId);
+      const existingApproval = existingApprovals.find(a => a.approverId === approverId);
+      
+      if (existingApproval) {
+        await storage.updateApproval(existingApproval.id, { status: status as any, comment });
+      } else {
+        await storage.createApproval({
+          tripId,
+          approverId,
+          status: status as any,
+          comment,
+        });
+      }
+      
+      const tripWithDetails = await storage.getTripWithDetails(tripId);
+      res.json(tripWithDetails);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to process approval" });
+    }
+  });
+
+  // Get dashboard stats
+  app.get("/api/stats/dashboard/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const allTrips = await storage.getAllTrips();
+      
+      // Filter trips that the user should see
+      const visibleTrips = await Promise.all(allTrips.map(async (trip) => {
+        const isOwnTrip = trip.employeeId === userId;
+        const isAdmin = user.role === "admin";
+        const isCeoOrDeputy = user.role != null && ["ceo", "deputy_ceo"].includes(user.role);
+        
+        if (isAdmin || isCeoOrDeputy) return trip;
+        if (isOwnTrip) return trip;
+        
+        // Рекурсивная проверка подчиненности
+        const checkSubordinate = async (managerId: string, targetId: string): Promise<boolean> => {
+          const subordinates = await storage.getUsersByManager(managerId);
+          if (subordinates.some(s => s.id === targetId)) return true;
+          for (const s of subordinates) {
+            // Чтобы избежать бесконечной рекурсии и лишних запросов
+            if (await checkSubordinate(s.id, targetId)) return true;
+          }
+          return false;
+        };
+        
+        const isSubordinate = await checkSubordinate(userId, trip.employeeId);
+        if (isSubordinate) return trip;
+        
+        return null;
+      }));
+      
+      const filteredTrips = visibleTrips.filter(t => t !== null && typeof t === 'object') as any[];
+      
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const nowStr = now.toISOString().split('T')[0];
+
+      // Manager specific: trips from subordinates that need approval
+      const tripsForApproval = await storage.getTripsForApproval(userId);
+
+      res.json({
+        totalTrips: filteredTrips.length,
+        pendingTrips: filteredTrips.filter(t => t.status === "pending").length,
+        approvedTrips: filteredTrips.filter(t => t.status === "approved").length,
+        activeTrips: filteredTrips.filter(t => 
+          t.status === "approved" && t.startDate <= nowStr && t.endDate >= nowStr
+        ).length,
+        rejectedTrips: filteredTrips.filter(t => t.status === "rejected").length,
+        pendingApprovals: tripsForApproval.filter(t => ["draft", "pending", "manager_approved", "director_approved"].includes(t.status)).length,
+      });
+    } catch (error) {
+      console.error("[STATS] Dashboard stats error:", error);
+      res.status(500).json({ error: "Failed to fetch stats" });
+    }
+  });
+
+  // ============ ROUTES ============
+  
+  // Get all routes
+  app.get("/api/routes", async (req, res) => {
+    try {
+      const routes = await storage.getAllRoutes();
+      res.json(routes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch routes" });
+    }
+  });
+
+  // Create route (admin only)
+  app.post("/api/routes", requireAdmin, async (req, res) => {
+    try {
+      console.log("[ROUTES] Create route request, userId:", req.session.userId);
+      console.log("[ROUTES] Create route request body:", JSON.stringify(req.body));
+      const { path, distance, cities, kilometers } = req.body;
+      
+      if (!path || !distance || !cities) {
+        return res.status(400).json({ error: "Missing required route fields" });
+      }
+
+      // Ensure cities is an array
+      const citiesArray = Array.isArray(cities) 
+        ? cities 
+        : typeof cities === 'string' 
+          ? cities.split(',').map(c => c.trim())
+          : [];
+
+      const route = await storage.createRoute({
+        path,
+        distance: String(distance),
+        cities: citiesArray,
+        kilometers: String(kilometers || distance.replace(/[^0-9]/g, '')),
+      });
+      
+      console.log("[ROUTES] Route created successfully:", route.id);
+      res.status(201).json(route);
+    } catch (error: any) {
+      console.error("[ROUTES] Error creating route:", error);
+      res.status(400).json({ error: error.message || "Failed to create route" });
+    }
+  });
+
+  // Delete route
+  app.delete("/api/routes/:id", requireAdmin, async (req, res) => {
+    try {
+      const success = await storage.deleteRoute(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete route" });
+    }
+  });
+
+  // Reset all trips (admin only)
+  app.post("/api/admin/reset-trips", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteAllTrips();
+      res.json({ success: true, message: "All trips and approvals have been cleared" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reset trips" });
+    }
+  });
+
+  // ============ REPORTS ============
+  
+  // Get trips report for month (with daily allowance calculation)
+  app.get("/api/admin/trips-report", requireAdmin, async (req, res) => {
+    try {
+      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
+      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      
+      const data = await getReportData(month, year);
+      res.json(data);
+    } catch (error) {
+      console.error("Report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  // Export trips report to Excel
+  app.get("/api/admin/trips-report/export", requireAdmin, async (req, res) => {
+    try {
+      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
+      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      
+      console.log(`[EXPORT] Request received - session.userId: ${req.session.userId}, sessionID: ${req.sessionID}`);
+      console.log(`[EXPORT] Exporting report for month=${month}, year=${year}`);
+      const data = await getReportData(month, year);
+      console.log(`[EXPORT] Report data ready: ${data.withAllowance.length} with allowance, ${data.withoutAllowance.length} without`);
+      
+      // Dynamically import ExcelJS
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Реестр командировок");
+      
+      const monthNames = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+      
+      // Title
+      const titleRow = worksheet.addRow([
+        `Реестр командировок на ${monthNames[month]} ${year} г.`,
+      ]);
+      titleRow.font = { bold: true, size: 14 };
+      worksheet.mergeCells("A1:H1");
+      
+      // Empty row
+      worksheet.addRow([]);
+      
+      // Header
+      const headers = [
+        "№ п/п",
+        "ФИО",
+        "Отдел",
+        "Срок командировки",
+        "Город проживания - Город командировки - Город проживания",
+        "Транспорт",
+        "Ночей",
+        "Итог суточные, руб.",
+      ];
+      
+      const headerRow = worksheet.addRow(headers);
+      headerRow.font = { bold: true };
+      headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
+      
+      // Add "with allowance" trips
+      if (data.withAllowance && data.withAllowance.length > 0) {
+        worksheet.addRow([]);
+        worksheet.addRow(["Командировки с суточными"]);
+        
+        data.withAllowance.forEach((trip) => {
+          const startDate = new Date(trip.startDate);
+          const endDate = new Date(trip.endDate);
+          const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
+          const routePath = trip.route?.path || "-";
+          const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
+
+          worksheet.addRow([
+            trip.number,
+            trip.employee?.fullName || "-",
+            trip.employee?.department || "-",
+            tripDates,
+            routePath,
+            transportMap[trip.transportType] || trip.transportType,
+            trip.nights,
+            trip.totalAllowance,
+          ]);
+        });
+
+        // Subtotal for with allowance
+        const subtotalWithRow = worksheet.addRow(["", "", "", "", "", "", "Итого по суточным:", data.totalWithAllowance]);
+        subtotalWithRow.font = { bold: true };
+        subtotalWithRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
+      }
+
+      // Empty row
+      worksheet.addRow([]);
+
+      // Add "without allowance" trips
+      if (data.withoutAllowance && data.withoutAllowance.length > 0) {
+        const sectionRow = worksheet.addRow(["Командировки без суточных"]);
+        sectionRow.font = { bold: true };
+
+        data.withoutAllowance.forEach((trip) => {
+          const startDate = new Date(trip.startDate);
+          const endDate = new Date(trip.endDate);
+          const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
+          const routePath = trip.route?.path || "-";
+          const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
+
+          worksheet.addRow([
+            trip.number,
+            trip.employee?.fullName || "-",
+            trip.employee?.department || "-",
+            tripDates,
+            routePath,
+            transportMap[trip.transportType] || trip.transportType,
+            trip.nights,
+            trip.totalAllowance || 0,
+          ]);
+        });
+
+        // Subtotal for without allowance
+        const subtotalWithoutRow = worksheet.addRow(["", "", "", "", "", "", "Итого по без суточных:", data.totalWithoutAllowance]);
+        subtotalWithoutRow.font = { bold: true };
+        subtotalWithoutRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
+      }
+
+      // Empty row before grand total
+      worksheet.addRow([]);
+
+      // Grand total
+      if ((data.withAllowance && data.withAllowance.length > 0) || (data.withoutAllowance && data.withoutAllowance.length > 0)) {
+        const grandTotalRow = worksheet.addRow(["", "", "", "", "", "", "ОБЩИЙ ИТОГ:", data.grandTotal]);
+        grandTotalRow.font = { bold: true, size: 12 };
+        grandTotalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
+      }
+
+      // Adjust column widths
+      worksheet.columns = [
+        { width: 8 },
+        { width: 25 },
+        { width: 15 },
+        { width: 25 },
+        { width: 45 },
+        { width: 12 },
+        { width: 8 },
+        { width: 15 },
+      ];
+      
+      // Generate buffer
+      const buffer = await workbook.xlsx.writeBuffer() as Buffer;
+      console.log(`[EXPORT] Buffer generated, size: ${buffer.length} bytes`);
+      
+      // Send file
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      const encodedFileName = encodeURIComponent(`Реестр_командировок_${monthNames[month]}_${year}.xlsx`);
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodedFileName}`);
+      console.log(`[EXPORT] Sending file: ${encodedFileName}`);
+      res.send(buffer);
+    } catch (error) {
+      console.error("Export error:", error);
+      res.status(500).json({ error: "Failed to export report" });
+    }
+  });
+
+  // ============ DAILY ALLOWANCE ============
+  
+  app.get("/api/daily-allowance", async (_req, res) => {
+    try {
+      const allowance = await storage.getDailyAllowance();
+      if (!allowance) {
+        // Return default if not set
+        return res.json({ amountPerNight: "1700" });
+      }
+      res.json(allowance);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch daily allowance" });
+    }
+  });
+
+  app.post("/api/daily-allowance", requireAdmin, async (req, res) => {
+    try {
+      const parsed = insertDailyAllowanceSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid daily allowance data" });
+      }
+      const allowance = await storage.updateDailyAllowance(parsed.data.amountPerNight);
+      res.json(allowance);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update daily allowance" });
+    }
+  });
+
+  // ============ HOLIDAYS ============
+
+  app.get("/api/holidays", async (_req, res) => {
+    try {
+      const holidays = await storage.getAllHolidays();
+      res.json(holidays);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch holidays" });
+    }
+  });
+
+  app.post("/api/holidays", requireAdmin, async (req, res) => {
+    try {
+      const parsed = insertHolidaySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid holiday data" });
+      }
+      const holiday = await storage.createHoliday(parsed.data);
+      res.status(201).json(holiday);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create holiday" });
+    }
+  });
+
+  app.patch("/api/holidays/:id", requireAdmin, async (req, res) => {
+    try {
+      const parsed = insertHolidaySchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid holiday data" });
+      }
+      const holiday = await storage.updateHoliday(req.params.id, parsed.data);
+      if (!holiday) {
+        return res.status(404).json({ error: "Holiday not found" });
+      }
+      res.json(holiday);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update holiday" });
+    }
+  });
+
+  app.delete("/api/holidays/:id", requireAdmin, async (req, res) => {
+    try {
+      const success = await storage.deleteHoliday(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Holiday not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete holiday" });
+    }
+  });
+
+  // ============ USER ACCOUNT ENDPOINTS ============
+
+  // Change password
+  app.patch("/api/auth/change-password", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Current and new password required" });
+      }
+
+      const user = await storage.getUser(req.session.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Verify current password
+      const validated = await storage.validatePassword(user.email, currentPassword);
+      if (!validated) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      // Validate new password
+      const validation = validatePassword(newPassword);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.errors.join(", ") });
+      }
+
+      // Update password
+      await storage.updateUser(user.id, { password: newPassword } as any);
+      res.json({ success: true, message: "Password changed successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to change password" });
+    }
+  });
+
+  // Contact admin (send message)
+  app.post("/api/contact-admin", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { subject, message, attachment } = await readMultipartFields(req);
+      if (!subject || !message) {
+        return res.status(400).json({ error: "Subject and message required" });
+      }
+
+      const user = await storage.getUser(req.session.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Save message to database so admin can see it in the admin panel
+      await storage.saveContactMessage({
+        fromUserId: user.id,
+        fromUserName: user.fullName,
+        fromUserEmail: user.email,
+        subject,
+        message,
+        attachmentUrl: attachment?.buffer && attachment?.filename ? (() => {
+          const safeName = `${Date.now()}-${randomUUID()}-${attachment.filename}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+          fs.writeFileSync(path.join(attachmentsDir, safeName), attachment.buffer);
+          cleanupOldAttachments();
+          return attachmentUrl(safeName);
+        })() : undefined,
+        attachmentName: attachment?.filename,
+        attachmentContentType: attachment?.mimetype,
+      });
+
+      // Also try to send email (may fail silently if SMTP not configured)
+      try {
+        const admins = (await storage.getAllUsers()).filter(u => u.role === "admin");
+        if (admins.length > 0) {
+          const adminEmail = admins[0].email;
+          const emailContent = generateContactAdminEmail(user.fullName, user.email, subject, message);
+          await sendEmail({
+            to: adminEmail,
+            subject: `Сообщение от пользователя: ${subject}`,
+            html: emailContent,
+          });
+        }
+      } catch (_) {}
+
+      res.json({ success: true, message: "Message sent to admin" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send message" });
+    }
+  });
+
+  // Get all contact messages (admin only)
+  app.get("/api/admin/messages", requireAdmin, async (req, res) => {
+    try {
+      const messages = await storage.getAllContactMessages();
+      res.json(messages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get unread message count (admin only)
+  app.get("/api/admin/messages/unread-count", requireAdmin, async (req, res) => {
+    try {
+      const count = await storage.getUnreadMessageCount();
+      res.json({ count });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Mark message as read (admin only)
+  app.patch("/api/admin/messages/:id/read", requireAdmin, async (req, res) => {
+    try {
+      await storage.markMessageAsRead(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/admin/messages", requireAdmin, async (req, res) => {
+    try {
+      await storage.clearContactMessages();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Send credentials to all users (admin only)
+  app.post("/api/users/send-credentials", requireAdmin, async (req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      const nonAdminUsers = allUsers.filter(u => u.role !== "admin");
+
+      if (nonAdminUsers.length === 0) {
+        return res.status(400).json({ error: "No users to send credentials to" });
+      }
+
+      const results = {
+        sent: 0,
+        failed: 0,
+        errors: [] as string[],
+      };
+
+      for (const user of nonAdminUsers) {
+        try {
+          const newPassword = generateRandomPassword(8);
+          const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
+
+          await sendEmail({
+            to: user.email,
+            subject: "Учетные данные системы управления командировками",
+            html: emailContent,
+          });
+
+          results.sent++;
+          console.log(`[CREDENTIALS] Sent to ${user.email}`);
+        } catch (error: any) {
+          results.failed++;
+          results.errors.push(`${user.email}: ${error.message}`);
+          console.error(`[CREDENTIALS] Failed to send to ${user.email}:`, error);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Credentials sent to ${results.sent} users${results.failed > 0 ? `, ${results.failed} failed` : ""}`,
+        results,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send credentials" });
+    }
+  });
+
+  const httpServer = createServer(app);
+  return httpServer;
+}

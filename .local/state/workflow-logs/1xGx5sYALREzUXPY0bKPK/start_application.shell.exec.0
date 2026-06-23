@@ -1,0 +1,30 @@
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development tsx server/index-dev.ts
+
+[1G[0K[STORAGE] PostgreSQL initialized
+7:12:12 AM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+7:12:17 AM [express] GET /api/auth/session 401 in 3ms :: {"error":"Not authenticated"}
+[AUTH] Login attempt received
+[AUTH] Email: admin@company.ru, Password length: 17
+[AUTH] Session userId set to: 7792c71d-06cd-4e0a-af47-67366aae45ad, sessionID: 6MNjCd3YdqXambWat9nWsw78ujby2_lh
+[AUTH] Setting cookie with path: /, secure: false, httpOnly: true
+[AUTH] User logged in: admin@company.ru
+[AUTH] Session saved successfully
+[AUTH] Set-Cookie header: [90mundefined[39m
+7:12:46 AM [express] POST /api/auth/login 200 in 20ms :: {"id":"7792c71d-06cd-4e0a-af47-67366aae45ad…
+[AUTH] Login attempt received
+[AUTH] Email: admin@company.ru, Password length: 17
+[AUTH] Session userId set to: 7792c71d-06cd-4e0a-af47-67366aae45ad, sessionID: onLv4CAKXBDNdPR7fI8XD2MC970PfsiR
+[AUTH] Setting cookie with path: /, secure: false, httpOnly: true
+[AUTH] User logged in: admin@company.ru
+[AUTH] Session saved successfully
+[AUTH] Set-Cookie header: [90mundefined[39m
+7:12:53 AM [express] POST /api/auth/login 200 in 4ms :: {"id":"7792c71d-06cd-4e0a-af47-67366aae45ad"…
+7:12:53 AM [express] GET /api/auth/session 401 in 0ms :: {"error":"Not authenticated"}
+7:12:53 AM [express] GET /api/auth/session 200 in 5ms :: {"id":"7792c71d-06cd-4e0a-af47-67366aae45ad…

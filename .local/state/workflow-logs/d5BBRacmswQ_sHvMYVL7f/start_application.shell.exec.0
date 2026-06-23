@@ -1,0 +1,24 @@
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development tsx server/index-dev.ts
+
+[1G[0K[STORAGE] PostgreSQL initialized
+7:13:01 AM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+7:13:09 AM [express] GET /api/auth/session 401 in 1ms :: {"error":"Not authenticated"}
+7:13:56 AM [express] GET /api/auth/session 401 in 0ms :: {"error":"Not authenticated"}
+[AUTH] Login attempt received
+[AUTH] Email: admin@company.ru, Password length: 17
+[AUTH] Session userId set to: 7792c71d-06cd-4e0a-af47-67366aae45ad, sessionID: QNpnk-q2sso_BFFh_udpAQ1fkXAR2bkC
+[AUTH] Setting cookie with path: /, secure: false, httpOnly: true
+[AUTH] User logged in: admin@company.ru
+[AUTH] Session saved successfully
+[AUTH] Set-Cookie header: [90mundefined[39m
+7:22:52 AM [express] POST /api/auth/login 200 in 42ms :: {"id":"7792c71d-06cd-4e0a-af47-67366aae45ad…
+7:22:53 AM [express] GET /api/trips 200 in 27ms :: [{"id":"30dc965b-fb77-4d0c-879a-e2443bbb9cc0","em…
+7:22:53 AM [express] GET /api/approvals/pending/7792c71d-06cd-4e0a-af47-67366aae45ad 304 in 13ms :: …
+7:22:53 AM [express] GET /api/stats/dashboard/7792c71d-06cd-4e0a-af47-67366aae45ad 200 in 12ms :: {"…

@@ -1,0 +1,19 @@
+m	Fsvc9nRi5HYoIRO5_b7faPQuRYiV_d3O0C1SGEe5ehE-1773999991-1.0.1.1-hghYydwkkbmSOCcytKPfXLvt99e5ygwPCP5kY6_MqPUwUh98Qw2emCM08_2J6ywrWvKXaYDDsUD1E86cH5ExMbqG2FaEgr0gsq0yUyL5UmY	.replit.com	/	2026-03-20T10:16:31.720Z	177	✓	✓	None			Medium
+__Host-session-sig	eyJhbGciOiJSUzI1NiIsImtpZCI6ImNmLWp3dC0yMDI2LTAzLTE4LTAyMjciLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiI0MDMzMTAzMSIsInRjIjoxNzQxNTEwNTE3LCJlbnQiOmZhbHNlLCJwYWlkIjp0cnVlLCJpYXQiOjE3NzM5OTk4NDgsImV4cCI6MTc3NDAwMDc0OH0.dumwbZogRh-TYeKtH7FpuFUc_vTm88KfU_eQ04IE9XggVrn4-82YzAMPKrTjMYEysxu0eJIoW9HidEZR38_AL_06CVEiZYpeWCO6kGFB6tYjNHYEeKBYZM6AbrinkqQ0gOrjvpuvMkyPpin5tktmQyFKy2ZHSs_SW86KEWhG8VN1RgKtmUEU_rVvX_7M9-B2xni2WKnwgQDHqRTholAlEBXnCgdyHikQM4yjD5OXNnxPY3ahtcVsJyvTdH7qmler6IEpR1KPYj6u8R9Tnav4bAUniGUw_e4Krd3jlcC-qGT-GUafH001YDIPR70oqYsebE3Nqo0vhgvUGt8d9hPNcQ	replit.com	/	2026-03-20T09:59:08.203Z	563	✓	✓	Lax			Medium
+__Host-wr-paid	1	replit.com	/	2026-03-20T09:59:08.203Z	15	✓	✓	Lax			Medium
+__Host-wr-tc	1741510517	replit.com	/	2026-03-20T09:59:08.202Z	22	✓	✓	Lax			Medium
+__stripe_mid	a9f5a1de-fb92-48cf-81d6-99246d84310f4f5364	.replit.com	/	2027-03-19T08:37:00.000Z	54		✓	Strict			Medium
+_cfuvid	13_ECh9CgBPzthmG7KaoQ5P9Av_Gcn8Wyxx2MQBp8sc-1773909354049-0.0.1.1-604800000	.replit.com	/	Session	82	✓	✓	None			Medium
+_dd_s	logs=1&id=0ae788bd-53fe-48d3-bd1a-2d5925c7e37e&created=1773990224331&expire=1774001095653&rum=0	replit.com	/	2026-03-20T10:05:10.000Z	100			Strict			Medium
+_ga	GA1.2.770074352.1773909356	.replit.com	/	2027-04-23T08:36:53.457Z	29						Medium
+_ga_MPJY3F1YEL	GS2.2.s1773996449$o7$g1$t1774000168$j22$l0$h565538365	.replit.com	/	2027-04-24T09:49:28.020Z	67						Medium
+_gcl_au	1.1.387676186.1773909356	.replit.com	/	2026-06-17T08:35:56.000Z	31						Medium
+ajs_anonymous_id	8d35cc1e-d03d-42b5-94f5-97f91664de19	.replit.com	/	2027-03-20T09:49:27.000Z	52			Lax			Medium
+ajs_user_id	40331031	.replit.com	/	2027-03-20T09:49:27.000Z	19			Lax			Medium
+amplitudeSessionId	1773996449	replit.com	/	2026-03-20T10:19:27.000Z	28						Medium
+analytics_session_id	1773996449523	.replit.com	/	2027-03-20T09:49:27.000Z	33			Lax			Medium
+analytics_session_id.last_access	1774000167955	.replit.com	/	2027-03-20T09:49:27.000Z	45			Lax			Medium
+connect.sid	eyJhbGciOiJSUzI1NiIsImtpZCI6InZWX3pZdyJ9.eyJpc3MiOiJodHRwczovL3Nlc3Npb24uZmlyZWJhc2UuZ29vZ2xlLmNvbS9yZXBsaXQtd2ViIiwibmFtZSI6ItCV0LLQs9C10L3QuNC5INCT0L7RgNC10LvRjNGB0LrQuNC5IiwicGljdHVyZSI6Imh0dHBzOi8vbGgzLmdvb2dsZXVzZXJjb250ZW50LmNvbS9hL0FDZzhvY0xvdnBhNE8tR19Cb1d3dWk4d2I5aTllTzVrMGREMWZxMGdsdGdGTVVYSEp1eW9vNzhcdTAwM2RzOTYtYyIsImF1ZCI6InJlcGxpdC13ZWIiLCJhdXRoX3RpbWUiOjE3NzM5MDk0MDcsInVzZXJfaWQiOiJnU2o0TkZkSVpEWnZ3VWN1dlZSS2lURXVDUlcyIiwic3ViIjoiZ1NqNE5GZElaRFp2d1VjdXZWUktpVEV1Q1JXMiIsImlhdCI6MTc3MzkwOTQwOCwiZXhwIjoxNzc0NTE0MjA4LCJlbWFpbCI6ImVhZ29yZWxza2l5QGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJmaXJlYmFzZSI6eyJpZGVudGl0aWVzIjp7Imdvb2dsZS5jb20iOlsiMTEyOTc3OTI1ODk3MTk1MDUwMjE3Il0sImVtYWlsIjpbImVhZ29yZWxza2l5QGdtYWlsLmNvbSJdfSwic2lnbl9pbl9wcm92aWRlciI6Imdvb2dsZS5jb20ifX0.m0Y1zj_LOszdo8htG7r5YOelKHwaam714pa_eOzh7G3SfePtEuDotKrPyYCCUoa-SAuQmQVldCnoitakP7vYtKn5Mod-HYb8EIfjNQymzkUngBc_vm4AUJSjlXDJA9UyS4HxtAmR3VP9nxl6Im55sPrXPEDMU2DE2eYFZ6cF-xetCd9ZPhfBKFl7wk-e3eMPPZnhFJtdAU13B0APBb_1nPuwrI4jvnel8uAr4c_Ip0NH3btGca0G6PUZXeaWKIsfCXDyptrMpyPV6tqa86TrGtsL-YkabEvMnNOIbMO3fDzZBHKgNjHZI4zbfzOC0E9tMbvI9xjO584RysZidq-Htw	replit.com	/	2026-03-26T08:36:48.655Z	1138	✓	✓	Lax			Medium
+ld_uid	40331031	replit.com	/	Session	14						Medium
+replit_authed	1	replit.com	/	2026-03-26T08:36:48.292Z	14						Medium
+replit_statsig_stable_id	12db3457-28a0-4569-a5e9-67bd747572d9	replit.com	/	2027-03-19T08:36:45.785Z	60		✓	Lax			Medium

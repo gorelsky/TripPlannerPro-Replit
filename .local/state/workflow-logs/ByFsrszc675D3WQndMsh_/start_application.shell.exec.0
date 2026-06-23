@@ -1,0 +1,19 @@
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development tsx server/index-dev.ts
+
+[1G[0K[STORAGE] PostgreSQL initialized
+7:24:06 AM [express] serving on port 5000
+[SESSION-DEBUG] Path: /api/admin/trips-report
+[SESSION-DEBUG] Headers: {"host":"6b18d2c5-6369-4b16-8cab-4cd0c2aa1de2-00-2zisdpx1r4uoj.riker.replit.dev","user-agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 YaBrowser/26.4.0.0 Safari/537.36","accept":"*/*","accept-encoding":"gzip, deflate, br, zstd","accept-language":"ru,en;q=0.9","cookie":"connect.sid=s%3AeS5EMofXNfjF5EU60xX--RS_kXIuefyY.a%2FPWQDXUxBIX96%2F2fc9jl2evUQ0k7VEYf1%2Fr0P2MPxo","referer":"https://6b18d2c5-6369-4b16-8cab-4cd0c2aa1de2-00-2zisdpx1r4uoj.riker.replit.dev/admin","sec-ch-ua":"\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"YaBrowser\";v=\"26.4\", \"Yowser\";v=\"2.5\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"Windows\"","sec-fetch-dest":"empty","sec-fetch-mode":"cors","sec-fetch-site":"same-origin","sec-fetch-storage-access":"active","x-forwarded-for":"213.221.24.180, 10.81.7.43, 10.48.1.111, 127.0.0.1","x-forwarded-host":"6b18d2c5-6369-4b16-8cab-4cd0c2aa1de2-00-2zisdpx1r4uoj.riker.replit.dev","x-forwarded-proto":"https","x-replit-user-bio":"","x-replit-user-id":"","x-replit-user-name":"","x-replit-user-profile-image":"","x-replit-user-roles":"","x-replit-user-teams":"","x-replit-user-url":""}
+[SESSION-DEBUG] Cookies: undefined
+[SESSION-DEBUG] session.id: tnYL2NsmgkxKfPc4Iyk3xY05F8yFYVXR
+[SESSION-DEBUG] session.userId: undefined
+[AUTH] requireAdmin check - session.userId: undefined, session.id: tnYL2NsmgkxKfPc4Iyk3xY05F8yFYVXR
+[AUTH] BLOCKED: No session.userId found
+7:24:12 AM [express] GET /api/admin/trips-report 401 in 4ms :: {"error":"Not authenticated"}
+7:24:23 AM [express] GET /api/stats/dashboard/7792c71d-06cd-4e0a-af47-67366aae45ad 304 in 38ms :: {"…
+7:24:26 AM [express] GET /api/users 200 in 1ms :: []
+7:24:27 AM [express] GET /api/trips 304 in 11ms :: [{"id":"30dc965b-fb77-4d0c-879a-e2443bbb9cc0","em…
+7:24:44 AM [express] POST /api/trips 201 in 210ms :: {"id":"175eed0b-0256-4d01-a7fa-20b700cd0b19","e…
+7:24:45 AM [express] GET /api/trips 200 in 17ms :: [{"id":"30dc965b-fb77-4d0c-879a-e2443bbb9cc0","em…

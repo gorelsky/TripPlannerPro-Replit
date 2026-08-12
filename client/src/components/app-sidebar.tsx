@@ -1,4 +1,4 @@
-import { Building2, Calendar, Users, MapPin, Settings, LayoutDashboard, CheckSquare, Shield, LogOut } from "lucide-react";
+import { Building2, Calendar, Users, MapPin, LayoutDashboard, CheckSquare, Shield, LogOut, MessageCircle } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -42,6 +42,11 @@ const menuItems = [
     title: "Мой профиль",
     url: "/profile",
     icon: Users,
+  },
+  {
+    title: "Чат",
+    url: "/chat",
+    icon: MessageCircle,
   },
 ];
 

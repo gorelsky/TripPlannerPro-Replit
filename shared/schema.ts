@@ -20,7 +20,7 @@ export type UserRole =
 export type TripStatus = "draft" | "pending" | "manager_approved" | "director_approved" | "approved" | "rejected";
 
 // Пользователи/Сотрудники
-export const users = pgTable("users", {
+export const users = pgTable("trip_planner_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   fullName: text("full_name").notNull(),
   email: text("email").notNull().unique(),
@@ -35,7 +35,7 @@ export const users = pgTable("users", {
 });
 
 // Города
-export const cities = pgTable("cities", {
+export const cities = pgTable("trip_planner_cities", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull().unique(),
   region: text("region"), // Регион
@@ -46,7 +46,7 @@ export const cities = pgTable("cities", {
 export type TransportType = "plane" | "train" | "car";
 
 // Командировки
-export const trips = pgTable("trips", {
+export const trips = pgTable("trip_planner_trips", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   employeeId: varchar("employee_id").notNull(),
   cityId: varchar("city_id"), // Опционально
@@ -61,7 +61,7 @@ export const trips = pgTable("trips", {
 });
 
 // Согласования
-export const approvals = pgTable("approvals", {
+export const approvals = pgTable("trip_planner_approvals", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tripId: varchar("trip_id").notNull(),
   approverId: varchar("approver_id").notNull(),
@@ -72,7 +72,7 @@ export const approvals = pgTable("approvals", {
 });
 
 // Маршруты (расстояния между городами)
-export const routes = pgTable("routes", {
+export const routes = pgTable("trip_planner_routes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   path: text("path").notNull(), // "Москва-Владимир-Гусь Хрустальный" 
   distance: text("distance").notNull(), // "346 км"
@@ -82,14 +82,14 @@ export const routes = pgTable("routes", {
 });
 
 // Справочник суточных (daily allowance)
-export const dailyAllowance = pgTable("daily_allowance", {
+export const dailyAllowance = pgTable("trip_planner_daily_allowance", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   amountPerNight: text("amount_per_night").notNull(), // Сумма за одну ночь (1700)
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Справочник праздников
-export const holidays = pgTable("holidays", {
+export const holidays = pgTable("trip_planner_holidays", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   date: text("date").notNull().unique(), // Формат "YYYY-MM-DD"
   description: text("description"),
@@ -101,7 +101,7 @@ export const insertHolidaySchema = createInsertSchema(holidays).omit({
   createdAt: true,
 });
 
-export const contactMessages = pgTable("contact_messages", {
+export const contactMessages = pgTable("trip_planner_contact_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   fromUserId: varchar("from_user_id").notNull(),
   fromUserName: varchar("from_user_name").notNull(),
@@ -115,13 +115,30 @@ export const contactMessages = pgTable("contact_messages", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const chatMessages = pgTable("trip_planner_chat_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fromUserId: varchar("from_user_id").notNull(),
+  toUserId: varchar("to_user_id").notNull(),
+  message: text("message").notNull(),
+  isRead: text("is_read").notNull().default("false"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertContactMessageSchema = createInsertSchema(contactMessages).omit({
   id: true,
   createdAt: true,
 });
 
+export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
+  id: true,
+  createdAt: true,
+  isRead: true,
+});
+
 export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = z.infer<typeof insertContactMessageSchema>;
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 
 export type Holiday = typeof holidays.$inferSelect;
 export type InsertHoliday = z.infer<typeof insertHolidaySchema>;
@@ -195,7 +212,23 @@ export type TripWithDetails = Trip & {
   route: Route;
   approvals?: ApprovalWithApprover[];
 };
+import { jsonb, integer } from "drizzle-orm/pg-core";
 
+export const eventLog = pgTable("trip_planner_event_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  eventType: text("event_type").notNull(),
+
+  payload: jsonb("payload").notNull(),
+
+  status: text("status").notNull().default("pending"),
+  // pending | done | dead
+
+  attempts: integer("attempts").notNull().default(0),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 export type UserWithManager = User & {
   manager?: User;
 };

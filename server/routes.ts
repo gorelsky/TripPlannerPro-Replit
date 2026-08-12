@@ -12,6 +12,8 @@ import {
   insertRouteSchema,
   insertDailyAllowanceSchema,
   insertHolidaySchema,
+  type Trip,
+  type User,
   type TripStatus 
 } from "@shared/schema";
 import { sendEmail, generateCredentialEmail, generateContactAdminEmail } from "./email-service";
@@ -203,11 +205,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { department } = req.query;
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
-      let users;
+      let users: User[];
 
       // Helper: dedupe by id
-      const deduped = (arr: typeof users) =>
-        [...new Map((arr as any[]).map(u => [u.id, u])).values()];
+      const deduped = (arr: User[]) =>
+        Array.from(new Map(arr.map(u => [u.id, u])).values());
 
       if (!currentUser) {
         // Unauthenticated — return empty
@@ -700,53 +702,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
+      let filteredTrips: Trip[] = [];
+      const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
 
-      const allTrips = await storage.getAllTrips();
-      
-      // Filter trips that the user should see
-      const visibleTrips = await Promise.all(allTrips.map(async (trip) => {
-        const isOwnTrip = trip.employeeId === userId;
-        const isAdmin = user.role === "admin";
-        const isCeoOrDeputy = user.role != null && ["ceo", "deputy_ceo"].includes(user.role);
-        
-        if (isAdmin || isCeoOrDeputy) return trip;
-        if (isOwnTrip) return trip;
-        
-        // Рекурсивная проверка подчиненности
-        const checkSubordinate = async (managerId: string, targetId: string): Promise<boolean> => {
-          const subordinates = await storage.getUsersByManager(managerId);
-          if (subordinates.some(s => s.id === targetId)) return true;
-          for (const s of subordinates) {
-            // Чтобы избежать бесконечной рекурсии и лишних запросов
-            if (await checkSubordinate(s.id, targetId)) return true;
-          }
-          return false;
-        };
-        
-        const isSubordinate = await checkSubordinate(userId, trip.employeeId);
-        if (isSubordinate) return trip;
-        
-        return null;
-      }));
-      
-      const filteredTrips = visibleTrips.filter(t => t !== null && typeof t === 'object') as any[];
-      
+      if (elevatedRoles.includes(user.role || "")) {
+        filteredTrips = await storage.getAllTrips();
+      } else if (user.role === "territorial_manager") {
+        const ownTrips = await storage.getTripsByEmployee(user.id);
+        const subordinateTrips = await storage.getTripsByManagerSubordinates(user.id);
+        const approvalTrips = await storage.getTripsForApproval(user.id);
+        const tripMap = new Map<string, Trip>();
+        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+        filteredTrips = Array.from(tripMap.values());
+      } else if (user.userType === "manager") {
+        const ownTrips = await storage.getTripsByEmployee(user.id);
+        const departmentTrips = user.department ? await storage.getTripsByDepartment(user.department) : [];
+        const approvalTrips = await storage.getTripsForApproval(user.id);
+        const tripMap = new Map<string, Trip>();
+        [...ownTrips, ...departmentTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+        filteredTrips = Array.from(tripMap.values());
+      } else if (user.department) {
+        filteredTrips = await storage.getTripsByDepartment(user.department);
+      } else {
+        filteredTrips = await storage.getTripsByEmployee(user.id);
+      }
       const now = new Date();
       now.setHours(0, 0, 0, 0);
       const nowStr = now.toISOString().split('T')[0];
 
       // Manager specific: trips from subordinates that need approval
       const tripsForApproval = await storage.getTripsForApproval(userId);
+      const pendingStatuses = ["pending", "manager_approved", "director_approved"];
 
       res.json({
         totalTrips: filteredTrips.length,
-        pendingTrips: filteredTrips.filter(t => t.status === "pending").length,
+        pendingTrips: filteredTrips.filter(t => pendingStatuses.includes(t.status)).length,
         approvedTrips: filteredTrips.filter(t => t.status === "approved").length,
         activeTrips: filteredTrips.filter(t => 
           t.status === "approved" && t.startDate <= nowStr && t.endDate >= nowStr
         ).length,
         rejectedTrips: filteredTrips.filter(t => t.status === "rejected").length,
-        pendingApprovals: tripsForApproval.filter(t => ["draft", "pending", "manager_approved", "director_approved"].includes(t.status)).length,
+        pendingApprovals: tripsForApproval.filter(t => pendingStatuses.includes(t.status)).length,
       });
     } catch (error) {
       console.error("[STATS] Dashboard stats error:", error);
@@ -1213,11 +1209,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { department } = req.query;
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
-      let users;
+      let users: User[];
 
       // Helper: dedupe by id
-      const deduped = (arr: typeof users) =>
-        [...new Map((arr as any[]).map(u => [u.id, u])).values()];
+      const deduped = (arr: User[]) =>
+        Array.from(new Map(arr.map(u => [u.id, u])).values());
 
       if (!currentUser) {
         // Unauthenticated — return empty
@@ -1687,35 +1683,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const allTrips = await storage.getAllTrips();
-      
-      // Filter trips that the user should see
-      const visibleTrips = await Promise.all(allTrips.map(async (trip) => {
-        const isOwnTrip = trip.employeeId === userId;
-        const isAdmin = user.role === "admin";
-        const isCeoOrDeputy = user.role != null && ["ceo", "deputy_ceo"].includes(user.role);
-        
-        if (isAdmin || isCeoOrDeputy) return trip;
-        if (isOwnTrip) return trip;
-        
-        // Рекурсивная проверка подчиненности
-        const checkSubordinate = async (managerId: string, targetId: string): Promise<boolean> => {
-          const subordinates = await storage.getUsersByManager(managerId);
-          if (subordinates.some(s => s.id === targetId)) return true;
-          for (const s of subordinates) {
-            // Чтобы избежать бесконечной рекурсии и лишних запросов
-            if (await checkSubordinate(s.id, targetId)) return true;
-          }
-          return false;
-        };
-        
-        const isSubordinate = await checkSubordinate(userId, trip.employeeId);
-        if (isSubordinate) return trip;
-        
-        return null;
-      }));
-      
-      const filteredTrips = visibleTrips.filter(t => t !== null && typeof t === 'object') as any[];
+      let filteredTrips: Trip[] = [];
+      const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
+
+      if (elevatedRoles.includes(user.role || "")) {
+        filteredTrips = await storage.getAllTrips();
+      } else if (user.role === "territorial_manager") {
+        const ownTrips = await storage.getTripsByEmployee(user.id);
+        const subordinateTrips = await storage.getTripsByManagerSubordinates(user.id);
+        const approvalTrips = await storage.getTripsForApproval(user.id);
+        const tripMap = new Map<string, Trip>();
+        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+        filteredTrips = Array.from(tripMap.values());
+      } else if (user.userType === "manager") {
+        const ownTrips = await storage.getTripsByEmployee(user.id);
+        const departmentTrips = user.department ? await storage.getTripsByDepartment(user.department) : [];
+        const approvalTrips = await storage.getTripsForApproval(user.id);
+        const tripMap = new Map<string, Trip>();
+        [...ownTrips, ...departmentTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
+        filteredTrips = Array.from(tripMap.values());
+      } else if (user.department) {
+        filteredTrips = await storage.getTripsByDepartment(user.department);
+      } else {
+        filteredTrips = await storage.getTripsByEmployee(user.id);
+      }
       
       const now = new Date();
       now.setHours(0, 0, 0, 0);
@@ -1723,16 +1714,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Manager specific: trips from subordinates that need approval
       const tripsForApproval = await storage.getTripsForApproval(userId);
+      const pendingStatuses = ["pending", "manager_approved", "director_approved"];
 
       res.json({
         totalTrips: filteredTrips.length,
-        pendingTrips: filteredTrips.filter(t => t.status === "pending").length,
+        pendingTrips: filteredTrips.filter(t => pendingStatuses.includes(t.status)).length,
         approvedTrips: filteredTrips.filter(t => t.status === "approved").length,
         activeTrips: filteredTrips.filter(t => 
           t.status === "approved" && t.startDate <= nowStr && t.endDate >= nowStr
         ).length,
         rejectedTrips: filteredTrips.filter(t => t.status === "rejected").length,
-        pendingApprovals: tripsForApproval.filter(t => ["draft", "pending", "manager_approved", "director_approved"].includes(t.status)).length,
+        pendingApprovals: tripsForApproval.filter(t => pendingStatuses.includes(t.status)).length,
       });
     } catch (error) {
       console.error("[STATS] Dashboard stats error:", error);
@@ -2085,6 +2077,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: "Password changed successfully" });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to change password" });
+    }
+  });
+
+  // Chat with the system administrator.
+  app.get("/api/chat/messages", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const currentUser = await storage.getUser(req.session.userId);
+      if (!currentUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const requestedUserId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+      const correspondentId = currentUser.role === "admin" && requestedUserId
+        ? requestedUserId
+        : (await storage.getAllUsers()).find((user) => user.role === "admin")?.id;
+
+      if (!correspondentId || correspondentId === currentUser.id) {
+        return res.json([]);
+      }
+
+      const correspondent = await storage.getUser(correspondentId);
+      if (!correspondent || (currentUser.role !== "admin" && correspondent.role !== "admin")) {
+        return res.status(403).json({ error: "Chat is available only with an administrator" });
+      }
+
+      const messages = await storage.getChatMessagesBetweenUsers(currentUser.id, correspondentId);
+      await storage.markChatMessagesAsRead(currentUser.id, correspondentId);
+      res.json(messages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to load chat messages" });
+    }
+  });
+
+  app.post("/api/chat/messages", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const currentUser = await storage.getUser(req.session.userId);
+      const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+      if (!currentUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!message || message.length > 5000) {
+        return res.status(400).json({ error: "Message must contain from 1 to 5000 characters" });
+      }
+
+      const requestedRecipientId = typeof req.body?.toUserId === "string" ? req.body.toUserId : undefined;
+      const recipientId = currentUser.role === "admin"
+        ? requestedRecipientId
+        : (await storage.getAllUsers()).find((user) => user.role === "admin")?.id;
+
+      if (!recipientId || recipientId === currentUser.id) {
+        return res.status(400).json({ error: "Recipient is required" });
+      }
+
+      const recipient = await storage.getUser(recipientId);
+      if (!recipient || (currentUser.role !== "admin" && recipient.role !== "admin")) {
+        return res.status(403).json({ error: "Chat is available only with an administrator" });
+      }
+
+      const savedMessage = await storage.saveChatMessage({
+        fromUserId: currentUser.id,
+        toUserId: recipientId,
+        message,
+      });
+      res.status(201).json(savedMessage);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send chat message" });
+    }
+  });
+
+  app.get("/api/chat/threads", requireAdmin, async (req, res) => {
+    try {
+      const currentUserId = req.session.userId as string;
+      const [users, messages] = await Promise.all([
+        storage.getAllUsers(),
+        storage.getAllChatMessages(),
+      ]);
+      const threads = users
+        .filter((user) => user.id !== currentUserId && user.role !== "admin")
+        .map((user) => {
+          const latestMessage = messages.find((message) =>
+            (message.fromUserId === user.id && message.toUserId === currentUserId) ||
+            (message.fromUserId === currentUserId && message.toUserId === user.id),
+          );
+          const unreadCount = messages.filter((message) =>
+            message.fromUserId === user.id && message.toUserId === currentUserId && message.isRead === "false",
+          ).length;
+          return { user, latestMessage: latestMessage ?? null, unreadCount };
+        })
+        .sort((first, second) => {
+          if (first.latestMessage && second.latestMessage) {
+            return new Date(second.latestMessage.createdAt).getTime() - new Date(first.latestMessage.createdAt).getTime();
+          }
+          return Number(Boolean(second.latestMessage)) - Number(Boolean(first.latestMessage));
+        });
+      res.json(threads);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to load chat threads" });
     }
   });
 

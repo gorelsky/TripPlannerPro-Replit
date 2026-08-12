@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, Users, Building2, CheckSquare, TrendingUp, Clock, X } from "lucide-react";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import type { TripWithDetails, TransportType } from "@shared/schema";
+import type { TripWithDetails, TransportType, User } from "@shared/schema";
 
 const transportLabels: Record<TransportType, string> = {
   car: "Авто",
@@ -28,6 +28,11 @@ export default function Dashboard() {
   
   const { data: trips = [], isLoading: tripsLoading } = useQuery<TripWithDetails[]>({
     queryKey: ["/api/trips"],
+    enabled: !!user,
+  });
+
+  const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
+    queryKey: ["/api/users"],
     enabled: !!user,
   });
 
@@ -59,6 +64,7 @@ export default function Dashboard() {
     enabled: !!(user && isManager),
   });
   const approvalTrips = approvalTripsData || [];
+  const pendingStatuses = ["pending", "manager_approved", "director_approved"];
 
   // Refetch stats whenever trips change
   useEffect(() => {
@@ -119,6 +125,63 @@ export default function Dashboard() {
 
   // User's own rejected trips (for everyone, including managers)
   const myRejectedTrips = trips.filter(t => t.employeeId === user?.id && t.status === "rejected");
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  const usersById = new Map(users.map((u) => [u.id, u]));
+  const managerPlanMap = new Map<string, {
+    id: string;
+    name: string;
+    department: string | null;
+    plannedTrips: number;
+    activeTrips: number;
+    upcomingTrips: number;
+    pendingTrips: number;
+    approvedTrips: number;
+    totalDays: number;
+    employeeIds: Set<string>;
+    nextTripDate: string | null;
+  }>();
+
+  trips
+    .filter((trip) => trip.status !== "rejected" && trip.endDate >= todayStr)
+    .forEach((trip) => {
+      const employee = trip.employee || usersById.get(trip.employeeId);
+      const manager = employee?.managerId ? usersById.get(employee.managerId) : undefined;
+      const managerId = manager?.id || (employee?.userType === "manager" ? employee.id : employee?.managerName ? `name:${employee.managerName}` : "unassigned");
+      const managerName = manager?.fullName || (employee?.userType === "manager" ? employee.fullName : employee?.managerName) || "Без менеджера";
+      const department = manager?.department || employee?.department || null;
+
+      if (!managerPlanMap.has(managerId)) {
+        managerPlanMap.set(managerId, {
+          id: managerId,
+          name: managerName,
+          department,
+          plannedTrips: 0,
+          activeTrips: 0,
+          upcomingTrips: 0,
+          pendingTrips: 0,
+          approvedTrips: 0,
+          totalDays: 0,
+          employeeIds: new Set<string>(),
+          nextTripDate: null,
+        });
+      }
+
+      const row = managerPlanMap.get(managerId)!;
+      row.plannedTrips += 1;
+      row.totalDays += getTripDuration(trip.startDate, trip.endDate);
+      row.employeeIds.add(trip.employeeId);
+      if (trip.startDate <= todayStr && trip.endDate >= todayStr) row.activeTrips += 1;
+      if (trip.startDate > todayStr) row.upcomingTrips += 1;
+      if (pendingStatuses.includes(trip.status)) row.pendingTrips += 1;
+      if (trip.status === "approved") row.approvedTrips += 1;
+      if (trip.startDate >= todayStr && (!row.nextTripDate || trip.startDate < row.nextTripDate)) {
+        row.nextTripDate = trip.startDate;
+      }
+    });
+
+  const managerPlanRows = Array.from(managerPlanMap.values())
+    .sort((a, b) => b.plannedTrips - a.plannedTrips || a.name.localeCompare(b.name));
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
@@ -196,6 +259,68 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3 md:pb-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm md:text-base">Планирование менеджеров</CardTitle>
+              <CardDescription className="text-xs md:text-sm">
+                Реальные командировки из текущей базы: активные и будущие планы
+              </CardDescription>
+            </div>
+            <Users className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {tripsLoading || usersLoading ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <Skeleton key={i} className="h-14 w-full" />
+              ))}
+            </div>
+          ) : managerPlanRows.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <p className="text-sm">Нет активных или будущих планов</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {managerPlanRows.map((row) => (
+                <div key={row.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(180px,1.5fr)_repeat(6,minmax(72px,1fr))] md:items-center">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{row.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{row.department || "Без отдела"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">В плане</p>
+                    <p className="text-sm font-semibold">{row.plannedTrips}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Сейчас</p>
+                    <p className="text-sm font-semibold">{row.activeTrips}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Будущие</p>
+                    <p className="text-sm font-semibold">{row.upcomingTrips}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">На соглас.</p>
+                    <p className="text-sm font-semibold">{row.pendingTrips}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Сотр.</p>
+                    <p className="text-sm font-semibold">{row.employeeIds.size}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Ближайшая</p>
+                    <p className="text-sm font-semibold">{row.nextTripDate ? formatDateShort(row.nextTripDate) : "-"}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Модальное окно с расшифровкой */}
       {selectedStats && (
@@ -548,4 +673,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

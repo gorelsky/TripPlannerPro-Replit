@@ -19,6 +19,8 @@ import {
   type InsertHoliday,
   type ContactMessage,
   type InsertContactMessage,
+  type ChatMessage,
+  type InsertChatMessage,
   users,
   cities,
   trips,
@@ -27,6 +29,7 @@ import {
   dailyAllowance,
   holidays,
   contactMessages,
+  chatMessages,
 } from "@shared/schema";
 import { randomUUID, createHash } from "crypto";
 import { db } from "./db";
@@ -99,11 +102,17 @@ export interface IStorage {
   getAllContactMessages(): Promise<ContactMessage[]>;
   markMessageAsRead(id: string): Promise<void>;
   getUnreadMessageCount(): Promise<number>;
+  // Chat messages
+  saveChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
+  getChatMessagesBetweenUsers(firstUserId: string, secondUserId: string): Promise<ChatMessage[]>;
+  getAllChatMessages(): Promise<ChatMessage[]>;
+  markChatMessagesAsRead(recipientId: string, senderId: string): Promise<void>;
 }
 
 export class PostgresStorage implements IStorage {
   private readonly ADMIN_PASSWORD = "Gorelsky@70719603";
   private initialized = false;
+  private chatTableReady?: Promise<void>;
 
   constructor() {
     this.initializeSampleData();
@@ -116,6 +125,22 @@ export class PostgresStorage implements IStorage {
 
   private hashPassword(password: string): string {
     return createHash("sha256").update(password).digest("hex");
+  }
+
+  private ensureChatTable(): Promise<void> {
+    if (!this.chatTableReady) {
+      this.chatTableReady = db.execute(sql`
+        CREATE TABLE IF NOT EXISTS trip_planner_chat_messages (
+          id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+          from_user_id varchar NOT NULL,
+          to_user_id varchar NOT NULL,
+          message text NOT NULL,
+          is_read text NOT NULL DEFAULT 'false',
+          created_at timestamp NOT NULL DEFAULT now()
+        )
+      `).then(() => undefined);
+    }
+    return this.chatTableReady;
   }
 
   private determineRoleFromJobTitle(jobTitle: string | undefined | null): string | null {
@@ -234,6 +259,8 @@ export class PostgresStorage implements IStorage {
     this.initialized = true;
 
     try {
+      await this.ensureChatTable();
+
       // Create admin if not exists
       const adminEmail = "admin@company.ru";
       const adminExists = await db
@@ -752,6 +779,9 @@ export class PostgresStorage implements IStorage {
     const newMsg: ContactMessage = {
       id: randomUUID(),
       ...msg,
+      attachmentUrl: msg.attachmentUrl ?? null,
+      attachmentName: msg.attachmentName ?? null,
+      attachmentContentType: msg.attachmentContentType ?? null,
       isRead: "false",
       createdAt: new Date(),
     };
@@ -776,6 +806,38 @@ export class PostgresStorage implements IStorage {
 
   async clearContactMessages(): Promise<void> {
     await db.delete(contactMessages);
+  }
+
+  async saveChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
+    await this.ensureChatTable();
+    const newMessage: ChatMessage = {
+      id: randomUUID(),
+      ...message,
+      isRead: "false",
+      createdAt: new Date(),
+    };
+    await db.insert(chatMessages).values(newMessage as any);
+    return newMessage;
+  }
+
+  async getChatMessagesBetweenUsers(firstUserId: string, secondUserId: string): Promise<ChatMessage[]> {
+    await this.ensureChatTable();
+    return db.select()
+      .from(chatMessages)
+      .where(sql`(from_user_id = ${firstUserId} AND to_user_id = ${secondUserId}) OR (from_user_id = ${secondUserId} AND to_user_id = ${firstUserId})`)
+      .orderBy(sql`created_at ASC`);
+  }
+
+  async getAllChatMessages(): Promise<ChatMessage[]> {
+    await this.ensureChatTable();
+    return db.select().from(chatMessages).orderBy(sql`created_at DESC`);
+  }
+
+  async markChatMessagesAsRead(recipientId: string, senderId: string): Promise<void> {
+    await this.ensureChatTable();
+    await db.update(chatMessages)
+      .set({ isRead: "true" })
+      .where(sql`to_user_id = ${recipientId} AND from_user_id = ${senderId} AND is_read = 'false'`);
   }
 }
 

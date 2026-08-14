@@ -7,6 +7,7 @@ export const statusLabels: Record<TripStatus, string> = {
   director_approved: "Ожидает (ЗГД/Админ)",
   approved: "Согласовано",
   rejected: "Отклонено",
+  rescheduling: "На переносе",
 };
 
 export function getStatusColor(status: TripStatus): string {
@@ -17,6 +18,7 @@ export function getStatusColor(status: TripStatus): string {
     director_approved: "bg-blue-600 text-white",
     approved: "bg-green-500 text-white",
     rejected: "bg-red-500 text-white",
+    rescheduling: "bg-sky-500 text-white",
   };
   return colors[status];
 }

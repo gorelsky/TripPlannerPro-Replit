@@ -35,9 +35,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Plus, Trash2, Search, Calendar as CalendarIcon, Send, MapPin, Wallet, X, ExternalLink } from "lucide-react";
+import { Building2, Plus, Trash2, Search, Calendar as CalendarIcon, Send, MapPin, Wallet, X, ExternalLink, FileText, MoreHorizontal } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -53,7 +54,10 @@ import { format, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
 import { statusLabels, getStatusColor } from "@/lib/status-utils";
 import { formatDateShort, getTripDuration } from "@/lib/date-utils";
-import type { TripStatus, City, User, InsertTrip, TripWithDetails, Route, DailyAllowance, TransportType, Holiday } from "@shared/schema";
+import type { TripStatus, City, User, InsertTrip, TripWithDetails, Route, DailyAllowance, TransportType, Holiday, TripType, TripMemoType } from "@shared/schema";
+
+type MemoKind = "unplanned" | "cancel" | "reschedule" | "change";
+type UnplannedScenario = "new" | "reschedule";
 
 export default function Trips() {
   const { user: currentUser } = useAuth();
@@ -73,7 +77,14 @@ export default function Trips() {
     purpose: "",
     trivioBookingNumber: "",
     trivioBookingUrl: "",
+    tripType: "planned" as TripType,
+    unplannedReason: "",
   });
+  const [memoDialog, setMemoDialog] = useState<{ trip: TripWithDetails; kind: MemoKind } | null>(null);
+  const [memoFields, setMemoFields] = useState({ reason: "", place: "", travelCost: "", accommodationCost: "", otherCost: "", newStartDate: "", newEndDate: "", newPurpose: "" });
+  const [isGeneratingMemo, setIsGeneratingMemo] = useState(false);
+  const [unplannedScenario, setUnplannedScenario] = useState<UnplannedScenario>("new");
+  const [sourceTripId, setSourceTripId] = useState("");
 
   const transportLabels: Record<TransportType, string> = {
     car: "Авто",
@@ -165,7 +176,14 @@ export default function Trips() {
       });
     },
     onError: (error: any) => {
-      const message = error.response?.data?.error || "Не удалось создать командировку";
+      const rawMessage = error?.message || "";
+      const responseBody = rawMessage.replace(/^\d+:\s*/, "");
+      let message = "Не удалось создать командировку";
+      try {
+        message = JSON.parse(responseBody).error || message;
+      } catch {
+        message = responseBody || message;
+      }
       toast({
         title: "Ошибка",
         description: message,
@@ -193,7 +211,9 @@ export default function Trips() {
   });
 
   const resetForm = () => {
-    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "" });
+    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", tripType: "planned", unplannedReason: "" });
+    setUnplannedScenario("new");
+    setSourceTripId("");
     setStartDate(undefined);
     setEndDate(undefined);
     setRouteSearch("");
@@ -217,10 +237,10 @@ export default function Trips() {
   };
 
   const handleSubmit = (status: TripStatus, force = false) => {
-    if (!currentUser || !formData.routeId || !startDate || !endDate || !formData.purpose.trim()) {
+    if (!currentUser || !formData.routeId || !startDate || !endDate || !formData.purpose.trim() || (formData.tripType === "unplanned" && (!formData.unplannedReason.trim() || (unplannedScenario === "reschedule" && !sourceTripId)))) {
       toast({
         title: "Ошибка",
-        description: "Заполните все обязательные поля (Маршрут, Даты, Цель)",
+        description: "Заполните все обязательные поля, включая основание внеплановой поездки и исходную командировку при переносе",
         variant: "destructive",
       });
       return;
@@ -232,7 +252,7 @@ export default function Trips() {
       return;
     }
 
-    createMutation.mutate({
+    const tripData: InsertTrip = {
       employeeId: currentUser.id,
       cityId: formData.cityId || undefined,
       routeId: formData.routeId,
@@ -242,8 +262,15 @@ export default function Trips() {
       purpose: formData.purpose,
       trivioBookingNumber: formData.trivioBookingNumber.trim() || undefined,
       trivioBookingUrl: formData.trivioBookingUrl.trim() || undefined,
+      tripType: formData.tripType,
       status,
-    });
+    };
+    if (formData.tripType === "unplanned") {
+      tripData.unplannedReason = formData.unplannedReason.trim();
+      tripData.memoType = (unplannedScenario === "reschedule" ? "reschedule" : "unplanned") as TripMemoType;
+      if (unplannedScenario === "reschedule") tripData.sourceTripId = sourceTripId;
+    }
+    createMutation.mutate(tripData);
   };
 
   const filteredTrips = trips.filter(trip => {
@@ -262,6 +289,64 @@ export default function Trips() {
     const matchesStatus = statusFilter === "all" || trip.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const sourceTrips = trips
+    .filter((trip) => trip.employeeId === currentUser?.id && trip.status !== "rejected" && trip.status !== "rescheduling")
+    .sort((first, second) => first.startDate.localeCompare(second.startDate));
+
+  const openMemoDialog = (trip: TripWithDetails, kind: MemoKind, initialReason?: string) => {
+    setMemoFields({
+      reason: (initialReason ?? trip.unplannedReason) || "",
+      place: "",
+      travelCost: "",
+      accommodationCost: "",
+      otherCost: "",
+      newStartDate: kind === "reschedule" ? trip.startDate : "",
+      newEndDate: kind === "reschedule" ? trip.endDate : "",
+      newPurpose: "",
+    });
+    setMemoDialog({ trip, kind });
+  };
+
+  const startReschedule = (trip: TripWithDetails) => {
+    resetForm();
+    setFormData((current) => ({ ...current, tripType: "unplanned" }));
+    setUnplannedScenario("reschedule");
+    setSourceTripId(trip.id);
+    setIsDialogOpen(true);
+  };
+
+  const downloadMemo = async () => {
+    if (!memoDialog) return;
+    if (memoDialog.kind === "reschedule" && (!memoFields.newStartDate || !memoFields.newEndDate)) {
+      toast({ title: "Укажите новые даты", description: "Для служебной записки о переносе нужны обе новые даты.", variant: "destructive" });
+      return;
+    }
+    setIsGeneratingMemo(true);
+    try {
+      const response = await apiRequest("POST", `/api/trips/${memoDialog.trip.id}/memo`, { kind: memoDialog.kind, ...memoFields });
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("Content-Disposition") || "";
+      const encodedName = /filename\*=UTF-8''([^;]+)/.exec(contentDisposition)?.[1];
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = encodedName ? decodeURIComponent(encodedName) : "Служебная_записка.docx";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setMemoDialog(null);
+    } catch (error: any) {
+      toast({ title: "Не удалось сформировать документ", description: error.message, variant: "destructive" });
+    } finally {
+      setIsGeneratingMemo(false);
+    }
+  };
+
+  const memoTitle: Record<MemoKind, string> = {
+    unplanned: "СЗ на внеплановую командировку",
+    cancel: "СЗ на отмену командировки",
+    reschedule: "СЗ на перенос командировки",
+    change: "СЗ на изменение условий командировки",
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -346,6 +431,70 @@ export default function Trips() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="trip-type">Тип командировки *</Label>
+                <Select value={formData.tripType} onValueChange={(value) => {
+                  setFormData({ ...formData, tripType: value as TripType });
+                  if (value !== "unplanned") {
+                    setUnplannedScenario("new");
+                    setSourceTripId("");
+                  }
+                }}>
+                  <SelectTrigger id="trip-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="planned">Плановая</SelectItem>
+                    <SelectItem value="unplanned">Внеплановая</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {formData.tripType === "unplanned" && (
+                <div className="grid gap-4 rounded-md border bg-muted/20 p-3">
+                  <div className="grid gap-2">
+                    <Label htmlFor="unplanned-scenario">Основание создания внеплановой поездки *</Label>
+                    <Select value={unplannedScenario} onValueChange={(value) => {
+                      setUnplannedScenario(value as UnplannedScenario);
+                      setSourceTripId("");
+                    }}>
+                      <SelectTrigger id="unplanned-scenario"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="new">Новая внеплановая командировка</SelectItem>
+                        <SelectItem value="reschedule">Перенос ранее созданной командировки</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {unplannedScenario === "reschedule" && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="source-trip">Какую командировку переносим? *</Label>
+                      <Select value={sourceTripId} onValueChange={setSourceTripId}>
+                        <SelectTrigger id="source-trip"><SelectValue placeholder="Выберите командировку" /></SelectTrigger>
+                        <SelectContent>
+                          {sourceTrips.length ? sourceTrips.map((trip) => (
+                            <SelectItem key={trip.id} value={trip.id}>
+                              {trip.route.path} | {formatDateShort(trip.startDate)} - {formatDateShort(trip.endDate)}
+                            </SelectItem>
+                          )) : <SelectItem value="no-trips" disabled>Подходящих командировок нет</SelectItem>}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="unplanned-reason">
+                      {unplannedScenario === "reschedule" ? "Причина переноса *" : "Обоснование внеплановой командировки *"}
+                    </Label>
+                    <Textarea
+                      id="unplanned-reason"
+                      value={formData.unplannedReason}
+                      onChange={(event) => setFormData({ ...formData, unplannedReason: event.target.value })}
+                      placeholder={unplannedScenario === "reschedule" ? "Укажите причину переноса" : "Укажите обстоятельства, требующие срочного выезда"}
+                      rows={3}
+                    />
+                  </div>
+                </div>
+              )}
 
               <Button variant="outline" className="w-full justify-start" asChild>
                 <a
@@ -630,6 +779,8 @@ export default function Trips() {
                       <TableRow key={trip.id} className="hover-elevate">
                         <TableCell className="text-xs md:text-sm font-medium">
                           <span className="font-bold text-primary truncate">{routePath}</span>
+                          {trip.tripType === "unplanned" && <Badge variant="outline" className="ml-2 border-amber-500 text-[10px] text-amber-700">Внеплановая</Badge>}
+                          {trip.memoType === "reschedule" && <Badge variant="outline" className="ml-2 border-sky-500 text-[10px] text-sky-700">Перенос</Badge>}
                           {(trip.trivioBookingNumber || trip.trivioBookingUrl) && (
                             <div className="mt-1 flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
                               <span>Trivio{trip.trivioBookingNumber ? `: ${trip.trivioBookingNumber}` : ""}</span>
@@ -681,15 +832,59 @@ export default function Trips() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-xs md:text-sm text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteMutation.mutate(trip.id)}
-                            disabled={deleteMutation.isPending || trip.status === "approved"}
-                            data-testid={`button-delete-trip-${trip.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
+                          <div className="flex justify-end gap-1">
+                    {trip.tripType === "unplanned" && <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-8 gap-1 px-2" aria-label="Служебные записки">
+                          <FileText className="h-3.5 w-3.5" />
+                          СЗ
+                        </Button>
+                      </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {trip.tripType === "unplanned" && (
+                                  <DropdownMenuItem onClick={() => openMemoDialog(trip, "unplanned")}>
+                                    <FileText /> СЗ на внеплановую
+                                  </DropdownMenuItem>
+                                )}
+                                {trip.memoType === "reschedule" && (
+                                  <DropdownMenuItem onClick={() => openMemoDialog(trip, "reschedule")}>
+                                    <FileText /> СЗ на перенос
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                    }
+                    {!(["rescheduling", "rejected"] as TripStatus[]).includes(trip.status) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="h-8 gap-1 px-2" aria-label="Действия с командировкой">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                            Действия
                           </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => startReschedule(trip)}>
+                            <CalendarIcon /> Перенести командировку
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openMemoDialog(trip, "change")}>
+                            <FileText /> Изменить условия
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openMemoDialog(trip, "cancel")}>
+                            <X /> Отменить командировку
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => deleteMutation.mutate(trip.id)}
+                              disabled={deleteMutation.isPending || trip.status === "approved"}
+                              data-testid={`button-delete-trip-${trip.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -701,6 +896,52 @@ export default function Trips() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(memoDialog)} onOpenChange={(open) => !open && setMemoDialog(null)}>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{memoDialog ? memoTitle[memoDialog.kind] : "Служебная записка"}</DialogTitle>
+            <DialogDescription>ФИО, маршрут и исходные даты будут подставлены в ваш шаблон автоматически.</DialogDescription>
+          </DialogHeader>
+          {memoDialog?.kind === "unplanned" && (
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2"><Label>Обоснование внеплановой поездки</Label><Textarea value={memoFields.reason} onChange={(event) => setMemoFields({ ...memoFields, reason: event.target.value })} rows={3} /></div>
+              <div className="grid gap-2"><Label>Место пребывания</Label><Input value={memoFields.place} onChange={(event) => setMemoFields({ ...memoFields, place: event.target.value })} placeholder="Организация, подразделение или объект" /></div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="grid gap-2"><Label>Проезд</Label><Input value={memoFields.travelCost} onChange={(event) => setMemoFields({ ...memoFields, travelCost: event.target.value })} placeholder="Сумма" /></div>
+                <div className="grid gap-2"><Label>Проживание</Label><Input value={memoFields.accommodationCost} onChange={(event) => setMemoFields({ ...memoFields, accommodationCost: event.target.value })} placeholder="Сумма" /></div>
+                <div className="grid gap-2"><Label>Прочее</Label><Input value={memoFields.otherCost} onChange={(event) => setMemoFields({ ...memoFields, otherCost: event.target.value })} placeholder="Сумма" /></div>
+              </div>
+            </div>
+          )}
+          {memoDialog?.kind === "cancel" && <div className="grid gap-2 py-2"><Label>Причина отмены</Label><Textarea value={memoFields.reason} onChange={(event) => setMemoFields({ ...memoFields, reason: event.target.value })} rows={4} /></div>}
+          {memoDialog?.kind === "reschedule" && (
+            <div className="grid gap-4 py-2">
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                Новые даты командировки: <span className="font-medium">{memoDialog && formatDateShort(memoDialog.trip.startDate)} - {memoDialog && formatDateShort(memoDialog.trip.endDate)}</span>
+              </div>
+              <div className="grid gap-2"><Label>Причина переноса</Label><Textarea value={memoFields.reason} onChange={(event) => setMemoFields({ ...memoFields, reason: event.target.value })} rows={4} /></div>
+            </div>
+          )}
+          {memoDialog?.kind === "change" && (
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2"><Label>Новое направление</Label><Input value={memoFields.place} onChange={(event) => setMemoFields({ ...memoFields, place: event.target.value })} placeholder="Город, регион" /></div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid gap-2"><Label>Новая дата начала</Label><Input type="date" value={memoFields.newStartDate} onChange={(event) => setMemoFields({ ...memoFields, newStartDate: event.target.value })} /></div>
+                <div className="grid gap-2"><Label>Новая дата окончания</Label><Input type="date" value={memoFields.newEndDate} onChange={(event) => setMemoFields({ ...memoFields, newEndDate: event.target.value })} /></div>
+              </div>
+              <div className="grid gap-2"><Label>Изменение цели командировки</Label><Textarea value={memoFields.newPurpose} onChange={(event) => setMemoFields({ ...memoFields, newPurpose: event.target.value })} rows={3} /></div>
+              <div className="grid gap-2"><Label>Причина изменения</Label><Textarea value={memoFields.reason} onChange={(event) => setMemoFields({ ...memoFields, reason: event.target.value })} rows={3} /></div>
+            </div>
+          )}
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button className="w-full sm:w-auto" variant="outline" onClick={() => setMemoDialog(null)}>Отмена</Button>
+            <Button className="w-full sm:w-auto" onClick={downloadMemo} disabled={isGeneratingMemo}>
+              <FileText /> {isGeneratingMemo ? "Формирование..." : "Скачать Word"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

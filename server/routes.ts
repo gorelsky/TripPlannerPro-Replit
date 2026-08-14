@@ -18,6 +18,7 @@ import {
 } from "@shared/schema";
 import { sendEmail, generateCredentialEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
+import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
@@ -517,6 +518,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
       }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (data.memoType === "reschedule") {
+        const sourceTrip = data.sourceTripId ? await storage.getTrip(data.sourceTripId) : undefined;
+        if (data.tripType !== "unplanned" || !sourceTrip || sourceTrip.employeeId !== data.employeeId) {
+          return res.status(400).json({ error: "Для переноса выберите свою ранее созданную командировку" });
+        }
+      }
 
       // Check for overlapping trips
       const existingTrips = await storage.getTripsByEmployee(data.employeeId);
@@ -528,7 +535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const tripEnd = trip.endDate;
 
         // Overlap condition: (StartA <= EndB) and (EndA >= StartB)
-        return (start <= tripEnd) && (end >= tripStart);
+        return trip.id !== data.sourceTripId && (start <= tripEnd) && (end >= tripStart);
       });
 
       if (isOverlapping) {
@@ -536,6 +543,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const trip = await storage.createTrip(data);
+      if (data.memoType === "reschedule" && data.sourceTripId) {
+        await storage.updateTrip(data.sourceTripId, { status: "rescheduling" });
+      }
       
       // If status is pending, create approval request
       if (trip.status === "pending") {
@@ -1503,6 +1513,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
       }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (data.memoType === "reschedule") {
+        const sourceTrip = data.sourceTripId ? await storage.getTrip(data.sourceTripId) : undefined;
+        if (data.tripType !== "unplanned" || !sourceTrip || sourceTrip.employeeId !== data.employeeId) {
+          return res.status(400).json({ error: "Для переноса выберите свою ранее созданную командировку" });
+        }
+      }
 
       // Check for overlapping trips
       const existingTrips = await storage.getTripsByEmployee(data.employeeId);
@@ -1514,7 +1530,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const tripEnd = trip.endDate;
 
         // Overlap condition: (StartA <= EndB) and (EndA >= StartB)
-        return (start <= tripEnd) && (end >= tripStart);
+        return trip.id !== data.sourceTripId && (start <= tripEnd) && (end >= tripStart);
       });
 
       if (isOverlapping) {
@@ -1522,6 +1538,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const trip = await storage.createTrip(data);
+      if (data.memoType === "reschedule" && data.sourceTripId) {
+        await storage.updateTrip(data.sourceTripId, { status: "rescheduling" });
+      }
       
       // If status is pending, create approval request
       if (trip.status === "pending") {
@@ -2154,6 +2173,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(await getChatContacts(currentUser));
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to load chat contacts" });
+    }
+  });
+
+  app.post("/api/trips/:id/memo", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const currentUser = await storage.getUser(req.session.userId);
+      const trip = await storage.getTripWithDetails(req.params.id);
+      if (!currentUser || !trip) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+
+      const canGenerate = currentUser.role === "admin" || currentUser.id === trip.employeeId || currentUser.id === trip.employee.managerId;
+      if (!canGenerate) {
+        return res.status(403).json({ error: "You do not have access to this trip" });
+      }
+
+      const kind = req.body?.kind as TripMemoKind;
+      if (!["unplanned", "cancel", "reschedule", "change"].includes(kind)) {
+        return res.status(400).json({ error: "Unknown memo type" });
+      }
+      if (kind === "unplanned" && trip.tripType !== "unplanned") {
+        return res.status(400).json({ error: "This document is available only for unplanned trips" });
+      }
+      const sourceTrip = kind === "reschedule" && trip.sourceTripId
+        ? await storage.getTripWithDetails(trip.sourceTripId)
+        : trip;
+      if (!sourceTrip) {
+        return res.status(400).json({ error: "The original trip for rescheduling was not found" });
+      }
+      const newStartDate = typeof req.body?.newStartDate === "string" ? req.body.newStartDate : trip.startDate;
+      const newEndDate = typeof req.body?.newEndDate === "string" ? req.body.newEndDate : trip.endDate;
+      if (kind === "reschedule" && (!newStartDate || !newEndDate)) {
+        return res.status(400).json({ error: "New trip dates are required" });
+      }
+
+      const memo = await generateTripMemo(sourceTrip, kind, {
+        reason: typeof req.body?.reason === "string" ? req.body.reason.trim() : undefined,
+        place: typeof req.body?.place === "string" ? req.body.place.trim() : undefined,
+        travelCost: typeof req.body?.travelCost === "string" ? req.body.travelCost.trim() : undefined,
+        accommodationCost: typeof req.body?.accommodationCost === "string" ? req.body.accommodationCost.trim() : undefined,
+        otherCost: typeof req.body?.otherCost === "string" ? req.body.otherCost.trim() : undefined,
+        newStartDate,
+        newEndDate,
+        newPurpose: typeof req.body?.newPurpose === "string" ? req.body.newPurpose.trim() : undefined,
+      });
+
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(memo.fileName)}`);
+      res.send(memo.buffer);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to generate memo" });
     }
   });
 

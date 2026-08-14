@@ -115,6 +115,8 @@ export class PostgresStorage implements IStorage {
   private initialized = false;
   private chatTableReady?: Promise<void>;
   private tripBookingColumnsReady?: Promise<void>;
+  private tripTypeColumnsReady?: Promise<void>;
+  private tripMemoColumnsReady?: Promise<void>;
 
   constructor() {
     this.initializeSampleData();
@@ -158,6 +160,28 @@ export class PostgresStorage implements IStorage {
       `).then(() => undefined);
     }
     return this.tripBookingColumnsReady;
+  }
+
+  private ensureTripTypeColumns(): Promise<void> {
+    if (!this.tripTypeColumnsReady) {
+      this.tripTypeColumnsReady = db.execute(sql`
+        ALTER TABLE trip_planner_trips
+          ADD COLUMN IF NOT EXISTS trip_type text NOT NULL DEFAULT 'planned',
+          ADD COLUMN IF NOT EXISTS unplanned_reason text
+      `).then(() => undefined);
+    }
+    return this.tripTypeColumnsReady;
+  }
+
+  private ensureTripMemoColumns(): Promise<void> {
+    if (!this.tripMemoColumnsReady) {
+      this.tripMemoColumnsReady = db.execute(sql`
+        ALTER TABLE trip_planner_trips
+          ADD COLUMN IF NOT EXISTS source_trip_id varchar,
+          ADD COLUMN IF NOT EXISTS memo_type text
+      `).then(() => undefined);
+    }
+    return this.tripMemoColumnsReady;
   }
 
   private determineRoleFromJobTitle(jobTitle: string | undefined | null): string | null {
@@ -278,6 +302,8 @@ export class PostgresStorage implements IStorage {
     try {
       await this.ensureChatTable();
       await this.ensureTripBookingColumns();
+      await this.ensureTripTypeColumns();
+      await this.ensureTripMemoColumns();
 
       // Create admin if not exists
       const adminEmail = "admin@company.ru";

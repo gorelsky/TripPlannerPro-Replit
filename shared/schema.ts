@@ -17,7 +17,9 @@ export type UserRole =
   | "deputy_ceo"; // Заместитель генерального директора
 
 // Статусы командировки
-export type TripStatus = "draft" | "pending" | "manager_approved" | "director_approved" | "approved" | "rejected";
+export type TripStatus = "draft" | "pending" | "manager_approved" | "director_approved" | "approved" | "rejected" | "rescheduling";
+export type TripType = "planned" | "unplanned";
+export type TripMemoType = "unplanned" | "reschedule";
 
 // Пользователи/Сотрудники
 export const users = pgTable("trip_planner_users", {
@@ -57,6 +59,10 @@ export const trips = pgTable("trip_planner_trips", {
   transportType: text("transport_type").$type<TransportType>().notNull().default("car"), // Вид транспорта
   trivioBookingNumber: text("trivio_booking_number"), // Номер бронирования в Trivio
   trivioBookingUrl: text("trivio_booking_url"), // Ссылка на бронирование в Trivio
+  tripType: text("trip_type").$type<TripType>().notNull().default("planned"),
+  unplannedReason: text("unplanned_reason"),
+  sourceTripId: varchar("source_trip_id"), // Исходная поездка при переносе
+  memoType: text("memo_type").$type<TripMemoType>(), // Какая СЗ относится к внеплановой поездке
   status: text("status").notNull().$type<TripStatus>().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

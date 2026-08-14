@@ -18,6 +18,7 @@ import Cities from "@/pages/cities";
 import Admin from "@/pages/admin";
 import Profile from "@/pages/profile";
 import Chat from "@/pages/chat";
+import UserGuide from "@/pages/user-guide";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,7 @@ function Router() {
       <Route path="/cities" component={Cities} />
       <Route path="/profile" component={Profile} />
       <Route path="/chat" component={Chat} />
+      <Route path="/guide" component={UserGuide} />
       <Route path="/admin" component={Admin} />
       <Route component={NotFound} />
     </Switch>

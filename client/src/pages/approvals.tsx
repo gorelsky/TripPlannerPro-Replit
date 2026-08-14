@@ -31,7 +31,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
-import { CheckSquare, X, Check, Clock, Calendar as CalendarIcon } from "lucide-react";
+import { CheckSquare, X, Check, Clock, Calendar as CalendarIcon, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import {
@@ -324,6 +324,26 @@ export default function Approvals() {
                         <h4 className="text-sm font-medium mb-1">Цель командировки:</h4>
                         <p className="text-sm text-muted-foreground">{trip.purpose}</p>
                       </div>
+
+                      {(trip.trivioBookingNumber || trip.trivioBookingUrl) && (
+                        <div>
+                          <h4 className="text-sm font-medium mb-1">Бронирование Trivio:</h4>
+                          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                            {trip.trivioBookingNumber && <span>Номер: {trip.trivioBookingNumber}</span>}
+                            {trip.trivioBookingUrl && (
+                              <a
+                                href={trip.trivioBookingUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                              >
+                                Открыть бронирование
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {myPendingStatuses.includes(trip.status as TripStatus) && (
                         <div className="flex gap-2 pt-2">

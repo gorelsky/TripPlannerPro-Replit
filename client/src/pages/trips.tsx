@@ -35,7 +35,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Plus, Trash2, Search, Calendar as CalendarIcon, Send, MapPin, Wallet, X } from "lucide-react";
+import { Building2, Plus, Trash2, Search, Calendar as CalendarIcon, Send, MapPin, Wallet, X, ExternalLink } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -71,6 +71,8 @@ export default function Trips() {
     routeId: "",
     transportType: "car" as TransportType,
     purpose: "",
+    trivioBookingNumber: "",
+    trivioBookingUrl: "",
   });
 
   const transportLabels: Record<TransportType, string> = {
@@ -191,7 +193,7 @@ export default function Trips() {
   });
 
   const resetForm = () => {
-    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "" });
+    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "" });
     setStartDate(undefined);
     setEndDate(undefined);
     setRouteSearch("");
@@ -238,6 +240,8 @@ export default function Trips() {
       startDate: format(startDate, "yyyy-MM-dd"),
       endDate: format(endDate, "yyyy-MM-dd"),
       purpose: formData.purpose,
+      trivioBookingNumber: formData.trivioBookingNumber.trim() || undefined,
+      trivioBookingUrl: formData.trivioBookingUrl.trim() || undefined,
       status,
     });
   };
@@ -341,6 +345,42 @@ export default function Trips() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <Button variant="outline" className="w-full justify-start" asChild>
+                <a
+                  href="https://login.trivio.ru/?toUrl=/desktop/info"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Подобрать билеты и проживание в Trivio
+                </a>
+              </Button>
+              <p className="-mt-2 text-xs text-muted-foreground">
+                Откроется в новой вкладке: Ж/Д, авиа и размещение.
+              </p>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="trivio-booking-number">Номер бронирования Trivio</Label>
+                  <Input
+                    id="trivio-booking-number"
+                    value={formData.trivioBookingNumber}
+                    onChange={(event) => setFormData({ ...formData, trivioBookingNumber: event.target.value })}
+                    placeholder="Например, TRV-12345"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="trivio-booking-url">Ссылка на бронирование Trivio</Label>
+                  <Input
+                    id="trivio-booking-url"
+                    type="url"
+                    value={formData.trivioBookingUrl}
+                    onChange={(event) => setFormData({ ...formData, trivioBookingUrl: event.target.value })}
+                    placeholder="https://..."
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -586,6 +626,22 @@ export default function Trips() {
                       <TableRow key={trip.id} className="hover-elevate">
                         <TableCell className="text-xs md:text-sm font-medium">
                           <span className="font-bold text-primary truncate">{routePath}</span>
+                          {(trip.trivioBookingNumber || trip.trivioBookingUrl) && (
+                            <div className="mt-1 flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+                              <span>Trivio{trip.trivioBookingNumber ? `: ${trip.trivioBookingNumber}` : ""}</span>
+                              {trip.trivioBookingUrl && (
+                                <a
+                                  href={trip.trivioBookingUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex text-primary hover:underline"
+                                  aria-label="Открыть бронирование Trivio"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              )}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs md:text-sm hidden sm:table-cell">
                           <Badge variant="outline" className="text-[9px] md:text-xs">{transportLabels[trip.transportType]}</Badge>

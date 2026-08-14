@@ -55,6 +55,8 @@ export const trips = pgTable("trip_planner_trips", {
   purpose: text("purpose").notNull(), // Цель командировки
   routeId: varchar("route_id").notNull(), // Теперь обязательный
   transportType: text("transport_type").$type<TransportType>().notNull().default("car"), // Вид транспорта
+  trivioBookingNumber: text("trivio_booking_number"), // Номер бронирования в Trivio
+  trivioBookingUrl: text("trivio_booking_url"), // Ссылка на бронирование в Trivio
   status: text("status").notNull().$type<TripStatus>().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

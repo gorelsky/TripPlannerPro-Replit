@@ -396,6 +396,25 @@ export default function CalendarView() {
                         <p><strong>Транспорт:</strong> {transportLabels[trip.transportType]}</p>
                         <p><strong>Даты:</strong> {formatDateShort(trip.startDate)} — {formatDateShort(trip.endDate)}</p>
                         <p><strong>Цель:</strong> {trip.purpose}</p>
+                        {(trip.trivioBookingNumber || trip.trivioBookingUrl) && (
+                          <p>
+                            <strong>Trivio:</strong>{" "}
+                            {trip.trivioBookingNumber || "Бронирование"}
+                            {trip.trivioBookingUrl && (
+                              <>
+                                {" "}
+                                <a
+                                  href={trip.trivioBookingUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-primary underline underline-offset-2"
+                                >
+                                  Открыть
+                                </a>
+                              </>
+                            )}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))

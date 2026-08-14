@@ -1,4 +1,4 @@
-import { Building2, Calendar, Users, MapPin, LayoutDashboard, CheckSquare, Shield, LogOut, MessageCircle } from "lucide-react";
+import { Building2, Calendar, Users, MapPin, LayoutDashboard, CheckSquare, Shield, LogOut, MessageCircle, BookOpen } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -47,6 +47,11 @@ const menuItems = [
     title: "Чат",
     url: "/chat",
     icon: MessageCircle,
+  },
+  {
+    title: "Инструкция",
+    url: "/guide",
+    icon: BookOpen,
   },
 ];
 

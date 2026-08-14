@@ -78,6 +78,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return `/uploads/contact-screenshots/${filename}`;
   }
 
+  function isValidTrivioBookingUrl(value: string | null | undefined) {
+    if (!value) return true;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && (url.hostname === "trivio.ru" || url.hostname.endsWith(".trivio.ru"));
+    } catch {
+      return false;
+    }
+  }
+
   // ============ AUTH ============
   
   // Login
@@ -503,6 +513,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/trips", async (req, res) => {
     try {
       const data = insertTripSchema.parse(req.body);
+      if (!isValidTrivioBookingUrl(data.trivioBookingUrl)) {
+        return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
+      }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
 
       // Check for overlapping trips
@@ -570,6 +583,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/trips/:id", async (req, res) => {
     try {
       const data = insertTripSchema.partial().parse(req.body);
+      if (!isValidTrivioBookingUrl(data.trivioBookingUrl)) {
+        return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
+      }
       const trip = await storage.updateTrip(req.params.id, data);
       if (!trip) {
         return res.status(404).json({ error: "Trip not found" });
@@ -1483,6 +1499,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/trips", async (req, res) => {
     try {
       const data = insertTripSchema.parse(req.body);
+      if (!isValidTrivioBookingUrl(data.trivioBookingUrl)) {
+        return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
+      }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
 
       // Check for overlapping trips
@@ -1550,6 +1569,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/trips/:id", async (req, res) => {
     try {
       const data = insertTripSchema.partial().parse(req.body);
+      if (!isValidTrivioBookingUrl(data.trivioBookingUrl)) {
+        return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
+      }
       const trip = await storage.updateTrip(req.params.id, data);
       if (!trip) {
         return res.status(404).json({ error: "Trip not found" });

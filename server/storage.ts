@@ -114,6 +114,7 @@ export class PostgresStorage implements IStorage {
   private readonly ADMIN_PASSWORD = "Gorelsky@70719603";
   private initialized = false;
   private chatTableReady?: Promise<void>;
+  private tripBookingColumnsReady?: Promise<void>;
 
   constructor() {
     this.initializeSampleData();
@@ -146,6 +147,17 @@ export class PostgresStorage implements IStorage {
       `).then(() => undefined);
     }
     return this.chatTableReady;
+  }
+
+  private ensureTripBookingColumns(): Promise<void> {
+    if (!this.tripBookingColumnsReady) {
+      this.tripBookingColumnsReady = db.execute(sql`
+        ALTER TABLE trip_planner_trips
+          ADD COLUMN IF NOT EXISTS trivio_booking_number text,
+          ADD COLUMN IF NOT EXISTS trivio_booking_url text
+      `).then(() => undefined);
+    }
+    return this.tripBookingColumnsReady;
   }
 
   private determineRoleFromJobTitle(jobTitle: string | undefined | null): string | null {
@@ -265,6 +277,7 @@ export class PostgresStorage implements IStorage {
 
     try {
       await this.ensureChatTable();
+      await this.ensureTripBookingColumns();
 
       // Create admin if not exists
       const adminEmail = "admin@company.ru";

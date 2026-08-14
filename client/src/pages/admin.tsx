@@ -749,9 +749,9 @@ export default function Admin() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Панель администратора</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Панель администратора</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Управление пользователями и справочниками системы
           </p>
@@ -760,6 +760,7 @@ export default function Admin() {
           variant="outline"
           onClick={logout}
           data-testid="button-logout"
+          className="w-full sm:w-auto"
         >
           <LogOut className="h-4 w-4 mr-2" />
           Выход
@@ -803,17 +804,17 @@ export default function Admin() {
       )}
 
       <Tabs defaultValue="users" className="w-full">
-        <div className="sticky top-0 z-40 bg-background pb-3 -mx-8 px-8 pt-1 border-b mb-4">
-          <TabsList className="grid w-full grid-cols-5 lg:grid-cols-10">
-            <TabsTrigger value="users">Пользователи</TabsTrigger>
-            <TabsTrigger value="cities">Города</TabsTrigger>
-            <TabsTrigger value="routes">Маршруты</TabsTrigger>
-            <TabsTrigger value="holidays">Праздники</TabsTrigger>
-            <TabsTrigger value="allowance">Суточные</TabsTrigger>
-            <TabsTrigger value="report">Реестр</TabsTrigger>
-            <TabsTrigger value="credentials">Рассылка</TabsTrigger>
-            <TabsTrigger value="testing">Тест</TabsTrigger>
-            <TabsTrigger value="messages" className="relative">
+        <div className="sticky top-0 z-40 bg-background pb-3 -mx-4 px-4 pt-1 border-b mb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <TabsList className="grid h-auto w-full grid-cols-2 items-stretch gap-1 p-1 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10">
+            <TabsTrigger value="users" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Пользователи</TabsTrigger>
+            <TabsTrigger value="cities" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Города</TabsTrigger>
+            <TabsTrigger value="routes" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Маршруты</TabsTrigger>
+            <TabsTrigger value="holidays" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Праздники</TabsTrigger>
+            <TabsTrigger value="allowance" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Суточные</TabsTrigger>
+            <TabsTrigger value="report" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Реестр</TabsTrigger>
+            <TabsTrigger value="credentials" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Рассылка</TabsTrigger>
+            <TabsTrigger value="testing" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Тест</TabsTrigger>
+            <TabsTrigger value="messages" className="relative min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">
               Сообщения
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs rounded-full h-4 w-4 flex items-center justify-center font-bold">
@@ -821,7 +822,7 @@ export default function Admin() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="danger" className="text-destructive">Опасно</TabsTrigger>
+            <TabsTrigger value="danger" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight text-destructive sm:text-sm">Опасно</TabsTrigger>
           </TabsList>
         </div>
 
@@ -1001,12 +1002,12 @@ export default function Admin() {
             </DialogContent>
           </Dialog>
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-              <div>
+            <CardHeader className="flex flex-col items-stretch gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <CardTitle>Управление пользователями</CardTitle>
                 <CardDescription>Добавление, удаление и управление учетными записями</CardDescription>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Dialog>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -1247,12 +1248,12 @@ export default function Admin() {
         {/* ============ CITIES TAB ============ */}
         <TabsContent value="cities" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-              <div>
+            <CardHeader className="flex flex-col items-stretch gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <CardTitle>Управление городами</CardTitle>
                 <CardDescription>Справочник городов для командировок</CardDescription>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -1388,8 +1389,8 @@ export default function Admin() {
         {/* ============ ROUTES TAB ============ */}
         <TabsContent value="routes" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-              <div>
+            <CardHeader className="flex flex-col items-stretch gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <CardTitle>Управление маршрутами</CardTitle>
                 <CardDescription>Загрузите маршруты (Excel: Регион, Маршрут, Км) или добавьте вручную</CardDescription>
               </div>
@@ -1514,8 +1515,8 @@ export default function Admin() {
         {/* ============ HOLIDAYS TAB ============ */}
         <TabsContent value="holidays" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
-              <div className="flex-1">
+            <CardHeader className="flex flex-col items-stretch gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 flex-1">
                 <CardTitle>Праздничные дни</CardTitle>
                 <CardDescription>Управление праздниками и выходными для корректного расчета командировок</CardDescription>
               </div>

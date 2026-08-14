@@ -122,6 +122,14 @@ export default function Trips() {
   });
 
   const holidayDatesSet = new Set(holidaysList.map(h => h.date));
+  const isNonWorkingDay = (date: Date) => {
+    const day = date.getDay();
+    return day === 0 || day === 6 || holidayDatesSet.has(format(date, "yyyy-MM-dd"));
+  };
+  const nonWorkingDayModifiers = { nonWorkingDay: isNonWorkingDay };
+  const nonWorkingDayClassNames = {
+    nonWorkingDay: "bg-rose-50 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/20 dark:text-rose-300 dark:hover:bg-rose-950/35",
+  };
 
   const getRouteDistance = (cityName: string): string | null => {
     const route = routes.find(r => r.cities.includes(cityName));
@@ -194,9 +202,7 @@ export default function Trips() {
   const [pendingStatus, setPendingStatus] = useState<TripStatus | null>(null);
 
   const isWorkDay = (date: Date) => {
-    const day = date.getDay();
-    const dateStr = format(date, "yyyy-MM-dd");
-    return day !== 0 && day !== 6 && !holidayDatesSet.has(dateStr);
+    return !isNonWorkingDay(date);
   };
 
   const hasNonWorkingDays = (start: Date, end: Date) => {
@@ -360,6 +366,8 @@ export default function Trips() {
                         selected={startDate}
                         onSelect={setStartDate}
                         locale={ru}
+                        modifiers={nonWorkingDayModifiers}
+                        modifiersClassNames={nonWorkingDayClassNames}
                         disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                       />
                     </PopoverContent>
@@ -388,6 +396,8 @@ export default function Trips() {
                         selected={endDate}
                         onSelect={setEndDate}
                         locale={ru}
+                        modifiers={nonWorkingDayModifiers}
+                        modifiersClassNames={nonWorkingDayClassNames}
                         disabled={(date) => {
                           const today = new Date(new Date().setHours(0, 0, 0, 0));
                           if (startDate) {

@@ -262,7 +262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = await storage.getAllUsers();
       }
 
-      res.json(users);
+      res.json(users.sort((first, second) => first.fullName.localeCompare(second.fullName, "ru")));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch users" });
     }
@@ -1266,7 +1266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = await storage.getAllUsers();
       }
 
-      res.json(users);
+      res.json(users.sort((first, second) => first.fullName.localeCompare(second.fullName, "ru")));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch users" });
     }
@@ -2080,7 +2080,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Chat with the system administrator.
+  // Chat contacts: system administrator first, then colleagues and the direct manager.
+  const getChatContacts = async (user: User) => {
+    const users = await storage.getAllUsers();
+
+    if (user.role === "admin") {
+      return users
+        .filter((candidate) => candidate.id !== user.id)
+        .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
+    }
+
+    const administratorContacts = users
+      .filter((candidate) => candidate.id !== user.id && candidate.role === "admin")
+      .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
+    const contacts = new Map<string, User>();
+    for (const candidate of users) {
+      if (
+        candidate.id !== user.id &&
+        user.department &&
+        candidate.department === user.department
+      ) {
+        contacts.set(candidate.id, candidate);
+      }
+    }
+
+    if (user.managerId) {
+      const manager = users.find((candidate) => candidate.id === user.managerId);
+      if (manager && manager.id !== user.id) {
+        contacts.set(manager.id, manager);
+      }
+    }
+
+    const otherContacts = Array.from(contacts.values())
+      .filter((candidate) => candidate.role !== "admin")
+      .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
+
+    return [...administratorContacts, ...otherContacts];
+  };
+
+  app.get("/api/chat/contacts", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const currentUser = await storage.getUser(req.session.userId);
+      if (!currentUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json(await getChatContacts(currentUser));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to load chat contacts" });
+    }
+  });
+
   app.get("/api/chat/messages", async (req, res) => {
     try {
       if (!req.session.userId) {
@@ -2092,18 +2146,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const requestedUserId = typeof req.query.userId === "string" ? req.query.userId : undefined;
-      const correspondentId = currentUser.role === "admin" && requestedUserId
-        ? requestedUserId
-        : (await storage.getAllUsers()).find((user) => user.role === "admin")?.id;
+      const correspondentId = typeof req.query.userId === "string" ? req.query.userId : undefined;
 
       if (!correspondentId || correspondentId === currentUser.id) {
         return res.json([]);
       }
 
       const correspondent = await storage.getUser(correspondentId);
-      if (!correspondent || (currentUser.role !== "admin" && correspondent.role !== "admin")) {
-        return res.status(403).json({ error: "Chat is available only with an administrator" });
+      const contacts = await getChatContacts(currentUser);
+      const isAllowed = currentUser.role === "admin" || contacts.some((contact) => contact.id === correspondentId);
+      if (!correspondent || !isAllowed) {
+        return res.status(403).json({ error: "Chat is not available with this user" });
       }
 
       const messages = await storage.getChatMessagesBetweenUsers(currentUser.id, correspondentId);
@@ -2129,18 +2182,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Message must contain from 1 to 5000 characters" });
       }
 
-      const requestedRecipientId = typeof req.body?.toUserId === "string" ? req.body.toUserId : undefined;
-      const recipientId = currentUser.role === "admin"
-        ? requestedRecipientId
-        : (await storage.getAllUsers()).find((user) => user.role === "admin")?.id;
+      const recipientId = typeof req.body?.toUserId === "string" ? req.body.toUserId : undefined;
 
       if (!recipientId || recipientId === currentUser.id) {
         return res.status(400).json({ error: "Recipient is required" });
       }
 
       const recipient = await storage.getUser(recipientId);
-      if (!recipient || (currentUser.role !== "admin" && recipient.role !== "admin")) {
-        return res.status(403).json({ error: "Chat is available only with an administrator" });
+      const contacts = await getChatContacts(currentUser);
+      const isAllowed = currentUser.role === "admin" || contacts.some((contact) => contact.id === recipientId);
+      if (!recipient || !isAllowed) {
+        return res.status(403).json({ error: "Chat is not available with this user" });
       }
 
       const savedMessage = await storage.saveChatMessage({
@@ -2151,6 +2203,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(savedMessage);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send chat message" });
+    }
+  });
+
+  app.get("/api/chat/unread-count", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const count = await storage.getUnreadChatMessageCount(req.session.userId);
+      res.json({ count });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to load unread chat count" });
     }
   });
 

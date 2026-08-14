@@ -106,6 +106,7 @@ export interface IStorage {
   saveChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessagesBetweenUsers(firstUserId: string, secondUserId: string): Promise<ChatMessage[]>;
   getAllChatMessages(): Promise<ChatMessage[]>;
+  getUnreadChatMessageCount(userId: string): Promise<number>;
   markChatMessagesAsRead(recipientId: string, senderId: string): Promise<void>;
 }
 
@@ -125,6 +126,10 @@ export class PostgresStorage implements IStorage {
 
   private hashPassword(password: string): string {
     return createHash("sha256").update(password).digest("hex");
+  }
+
+  private sortUsersByFullName(records: User[]): User[] {
+    return records.sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
   }
 
   private ensureChatTable(): Promise<void> {
@@ -348,19 +353,19 @@ export class PostgresStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<User[]> {
-    return db.select().from(users);
+    return this.sortUsersByFullName(await db.select().from(users));
   }
 
   async getUsersByRole(role: string): Promise<User[]> {
-    return db.select().from(users).where(eq(users.role, role as any));
+    return this.sortUsersByFullName(await db.select().from(users).where(eq(users.role, role as any)));
   }
 
   async getUsersByManager(managerId: string): Promise<User[]> {
-    return db.select().from(users).where(eq(users.managerId, managerId));
+    return this.sortUsersByFullName(await db.select().from(users).where(eq(users.managerId, managerId)));
   }
 
   async getUsersByDepartment(department: string): Promise<User[]> {
-    return db.select().from(users).where(eq(users.department, department));
+    return this.sortUsersByFullName(await db.select().from(users).where(eq(users.department, department)));
   }
 
   async createUser(user: InsertUser): Promise<{ user: User; password: string }> {
@@ -831,6 +836,14 @@ export class PostgresStorage implements IStorage {
   async getAllChatMessages(): Promise<ChatMessage[]> {
     await this.ensureChatTable();
     return db.select().from(chatMessages).orderBy(sql`created_at DESC`);
+  }
+
+  async getUnreadChatMessageCount(userId: string): Promise<number> {
+    await this.ensureChatTable();
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(chatMessages)
+      .where(sql`to_user_id = ${userId} AND is_read = 'false'`);
+    return Number(result[0]?.count ?? 0);
   }
 
   async markChatMessagesAsRead(recipientId: string, senderId: string): Promise<void> {

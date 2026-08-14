@@ -7,16 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { ChatMessage, User } from "@shared/schema";
-
-type ChatThread = {
-  user: User;
-  latestMessage: ChatMessage | null;
-  unreadCount: number;
-};
 
 function formatTime(value: Date | string) {
   return new Date(value).toLocaleString("ru-RU", {
@@ -32,44 +25,44 @@ export default function Chat() {
   const { toast } = useToast();
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
-  const isAdmin = currentUser?.role === "admin";
 
-  const { data: threads = [], isLoading: threadsLoading } = useQuery<ChatThread[]>({
-    queryKey: ["/api/chat/threads"],
-    enabled: isAdmin,
+  const { data: contacts = [], isLoading: contactsLoading } = useQuery<User[]>({
+    queryKey: ["/api/chat/contacts"],
+    enabled: Boolean(currentUser),
     refetchInterval: 10000,
   });
 
   useEffect(() => {
-    if (isAdmin && !selectedUserId && threads.length > 0) {
-      setSelectedUserId(threads[0].user.id);
+    if (!selectedUserId && contacts.length > 0) {
+      setSelectedUserId(contacts[0].id);
     }
-  }, [isAdmin, selectedUserId, threads]);
+  }, [selectedUserId, contacts]);
 
-  const chatUrl = isAdmin && selectedUserId
-    ? `/api/chat/messages?userId=${encodeURIComponent(selectedUserId)}`
-    : "/api/chat/messages";
+  const chatUrl = selectedUserId ? `/api/chat/messages?userId=${encodeURIComponent(selectedUserId)}` : null;
 
   const { data: messages = [], isLoading: messagesLoading } = useQuery<ChatMessage[]>({
-    queryKey: [chatUrl],
-    enabled: Boolean(currentUser && (!isAdmin || selectedUserId)),
+    queryKey: [chatUrl ?? "/api/chat/messages"],
+    enabled: Boolean(currentUser && chatUrl),
     refetchInterval: 10000,
   });
 
-  const selectedThread = threads.find((thread) => thread.user.id === selectedUserId);
+  const selectedContact = contacts.find((contact) => contact.id === selectedUserId);
 
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/chat/messages", {
         message,
-        ...(isAdmin ? { toUserId: selectedUserId } : {}),
+        toUserId: selectedUserId,
       });
       return response.json() as Promise<ChatMessage>;
     },
     onSuccess: () => {
       setMessage("");
-      queryClient.invalidateQueries({ queryKey: [chatUrl] });
-      queryClient.invalidateQueries({ queryKey: ["/api/chat/threads"] });
+      if (chatUrl) {
+        queryClient.invalidateQueries({ queryKey: [chatUrl] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/chat/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/chat/unread-count"] });
     },
     onError: (error: Error) => {
       toast({
@@ -90,42 +83,41 @@ export default function Chat() {
   if (!currentUser) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1600px] space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Чат</h1>
+        <h1 className="text-xl font-semibold sm:text-2xl">Чат</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {isAdmin ? "Переписка с сотрудниками" : "Связь с администратором системы"}
+          Коллеги вашего отдела и непосредственный руководитель
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          По вопросам работы приложения используйте раздел «Мой профиль» → «Связь с администратором».
         </p>
       </div>
 
-      <Card className="overflow-hidden">
-        <div className="grid min-h-[600px] lg:grid-cols-[280px_1fr]">
-          {isAdmin && (
-            <div className="border-b lg:border-b-0 lg:border-r">
-              <div className="px-4 py-3 border-b font-medium">Сотрудники</div>
-              <ScrollArea className="h-[220px] lg:h-[548px]">
-                {threadsLoading ? (
+      <Card className="w-full overflow-hidden">
+        <div className="grid min-h-[560px] xl:min-h-[680px] xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
+          <div className="border-b xl:border-b-0 xl:border-r">
+              <div className="px-4 py-3 border-b font-medium">Контакты</div>
+              <ScrollArea className="h-[220px] xl:h-[628px]">
+                {contactsLoading ? (
                   <div className="p-4 space-y-3">
                     <Skeleton className="h-12 w-full" />
                     <Skeleton className="h-12 w-full" />
                   </div>
-                ) : threads.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">Сотрудников пока нет</p>
+                ) : contacts.length === 0 ? (
+                  <p className="p-4 text-sm text-muted-foreground">Нет доступных контактов</p>
                 ) : (
                   <div className="p-2 space-y-1">
-                    {threads.map((thread) => (
+                    {contacts.map((contact) => (
                       <button
-                        key={thread.user.id}
+                        key={contact.id}
                         type="button"
-                        onClick={() => setSelectedUserId(thread.user.id)}
-                        className={`w-full rounded-md px-3 py-2 text-left hover-elevate ${selectedUserId === thread.user.id ? "bg-muted" : ""}`}
+                        onClick={() => setSelectedUserId(contact.id)}
+                        className={`w-full rounded-md px-3 py-2 text-left hover-elevate ${selectedUserId === contact.id ? "bg-muted" : ""}`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-sm font-medium">{thread.user.fullName}</span>
-                          {thread.unreadCount > 0 && <Badge className="shrink-0">{thread.unreadCount}</Badge>}
-                        </div>
+                        <span className="block truncate text-sm font-medium">{contact.fullName}</span>
                         <p className="truncate text-xs text-muted-foreground mt-1">
-                          {thread.latestMessage?.message || thread.user.department || "Нет сообщений"}
+                          {contact.jobTitle || contact.department || "Сотрудник"}
                         </p>
                       </button>
                     ))}
@@ -133,20 +125,19 @@ export default function Chat() {
                 )}
               </ScrollArea>
             </div>
-          )}
 
           <div className="flex min-w-0 flex-col">
-            <CardHeader className="border-b py-4">
+            <CardHeader className="border-b px-4 py-4 sm:px-6">
               <CardTitle className="text-base flex items-center gap-2">
                 <MessageCircle className="h-5 w-5" />
-                {isAdmin ? selectedThread?.user.fullName || "Выберите сотрудника" : "Администратор"}
+                {selectedContact?.fullName || "Выберите собеседника"}
               </CardTitle>
-              {isAdmin && selectedThread && (
-                <CardDescription>{selectedThread.user.email}</CardDescription>
+              {selectedContact && (
+                <CardDescription>{selectedContact.jobTitle || selectedContact.department || selectedContact.email}</CardDescription>
               )}
             </CardHeader>
             <CardContent className="flex flex-1 flex-col p-0">
-              <ScrollArea className="h-[360px] p-4">
+              <ScrollArea className="h-[360px] p-3 sm:h-[440px] sm:p-4 xl:h-[520px]">
                 {messagesLoading ? (
                   <div className="space-y-3">
                     <Skeleton className="h-16 w-3/4" />
@@ -162,7 +153,7 @@ export default function Chat() {
                       const ownMessage = chatMessage.fromUserId === currentUser.id;
                       return (
                         <div key={chatMessage.id} className={`flex ${ownMessage ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[85%] rounded-md px-3 py-2 text-sm ${ownMessage ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                          <div className={`max-w-[92%] rounded-md px-3 py-2 text-sm sm:max-w-[85%] ${ownMessage ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                             <p className="whitespace-pre-wrap break-words">{chatMessage.message}</p>
                             <p className={`mt-1 text-[11px] ${ownMessage ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
                               {formatTime(chatMessage.createdAt)}
@@ -174,22 +165,23 @@ export default function Chat() {
                   </div>
                 )}
               </ScrollArea>
-              <form onSubmit={handleSubmit} className="border-t p-4">
-                <div className="flex items-end gap-2">
+              <form onSubmit={handleSubmit} className="border-t p-3 sm:p-4">
+                <div className="flex flex-col gap-2">
                   <Textarea
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
                     placeholder="Введите сообщение..."
-                    className="min-h-[76px] resize-none"
-                    disabled={isAdmin && !selectedUserId}
+                    className="min-h-[120px] min-w-0 w-full resize-none"
+                    disabled={!selectedUserId}
                   />
                   <Button
                     type="submit"
-                    size="icon"
                     aria-label="Отправить сообщение"
-                    disabled={!message.trim() || sendMessageMutation.isPending || (isAdmin && !selectedUserId)}
+                    className="w-full"
+                    disabled={!message.trim() || sendMessageMutation.isPending || !selectedUserId}
                   >
                     <Send />
+                    Отправить
                   </Button>
                 </div>
               </form>

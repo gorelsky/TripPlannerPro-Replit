@@ -9,8 +9,9 @@ import express, {
 import fs from "node:fs";
 import path from "node:path";
 import session from "express-session";
-import MemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
 
+import { pool } from "./db";
 import { registerRoutes } from "./routes";
 
 export function log(message: string, source = "express") {
@@ -47,9 +48,11 @@ app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", true);
 
 // Session middleware
-const SessionStore = MemoryStore(session);
-export const sessionStore = new SessionStore({
-  checkPeriod: 86400000, // prune expired entries every 24h
+const PostgresSessionStore = connectPgSimple(session);
+export const sessionStore = new PostgresSessionStore({
+  pool,
+  tableName: "trip_planner_sessions",
+  createTableIfMissing: true,
 });
 
 app.use(session({

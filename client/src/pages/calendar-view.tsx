@@ -71,6 +71,8 @@ export default function CalendarView() {
 
   const holidayDates = new Set(holidaysList.map(h => h.date));
   const isHoliday = (date: Date) => holidayDates.has(format(date, "yyyy-MM-dd"));
+  const isWeekend = (date: Date) => date.getDay() === 0 || date.getDay() === 6;
+  const isNonWorkingDay = (date: Date) => isWeekend(date) || isHoliday(date);
   const getHolidayName = (date: Date) =>
     holidaysList.find(h => h.date === format(date, "yyyy-MM-dd"))?.description || "Праздничный день";
 
@@ -173,7 +175,8 @@ export default function CalendarView() {
   }) => {
     const dayTrips = getTripsForDate(day);
     const holiday = isHoliday(day);
-    const holidayName = holiday ? getHolidayName(day) : null;
+    const nonWorkingDay = isNonWorkingDay(day);
+    const nonWorkingDayName = holiday ? getHolidayName(day) : "Выходной день";
     const inMonth = isSameMonth(day, referenceMonth);
     const limit = tiny ? 2 : 3;
 
@@ -183,7 +186,7 @@ export default function CalendarView() {
         minH,
         !inMonth && "bg-muted/30",
         isToday(day) && "bg-primary/5 ring-1 ring-primary/20",
-        holiday && inMonth && "bg-red-50 dark:bg-red-950/20"
+        nonWorkingDay && inMonth && "bg-rose-50 dark:bg-rose-950/20"
       )}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -191,15 +194,15 @@ export default function CalendarView() {
               "font-medium mb-1 w-fit",
               tiny ? "text-xs" : "text-sm",
               !inMonth && "text-muted-foreground",
-              isToday(day) && !holiday && "text-primary font-semibold",
-              holiday && inMonth && "text-red-600 dark:text-red-400 font-semibold"
+              isToday(day) && !nonWorkingDay && "text-primary font-semibold",
+              nonWorkingDay && inMonth && "text-rose-700 dark:text-rose-300 font-semibold"
             )}>
               {format(day, "d")}
             </div>
           </TooltipTrigger>
-          {holidayName && inMonth && (
+          {nonWorkingDay && inMonth && (
             <TooltipContent side="top">
-              <p className="text-xs">{holidayName}</p>
+              <p className="text-xs">{nonWorkingDayName}</p>
             </TooltipContent>
           )}
         </Tooltip>
@@ -232,8 +235,11 @@ export default function CalendarView() {
     });
     return (
       <div className="grid grid-cols-7 gap-px bg-border rounded-md overflow-hidden">
-        {WEEK_DAYS.map(d => (
-          <div key={d} className="bg-muted p-2 text-center text-xs font-medium text-muted-foreground">{d}</div>
+        {WEEK_DAYS.map((d, index) => (
+          <div key={d} className={cn(
+            "bg-muted p-2 text-center text-xs font-medium text-muted-foreground",
+            index >= 5 && "bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-300"
+          )}>{d}</div>
         ))}
         {days.map((day, i) => (
           <DayCell key={i} day={day} referenceMonth={currentDate} minH="min-h-24" />
@@ -252,10 +258,11 @@ export default function CalendarView() {
         {days.map((day, i) => (
           <div key={i} className={cn(
             "bg-muted p-2 text-center",
+            isNonWorkingDay(day) && "bg-rose-50 dark:bg-rose-950/20",
             isToday(day) && "bg-primary/10"
           )}>
-            <div className="text-xs font-medium text-muted-foreground">{WEEK_DAYS[i]}</div>
-            <div className={cn("text-sm font-semibold", isToday(day) && "text-primary")}>
+            <div className={cn("text-xs font-medium text-muted-foreground", isNonWorkingDay(day) && "text-rose-700 dark:text-rose-300")}>{WEEK_DAYS[i]}</div>
+            <div className={cn("text-sm font-semibold", isToday(day) && !isNonWorkingDay(day) && "text-primary", isNonWorkingDay(day) && "text-rose-700 dark:text-rose-300")}>
               {format(day, "d")}
             </div>
             <div className="text-xs text-muted-foreground capitalize">
@@ -289,8 +296,11 @@ export default function CalendarView() {
                 {format(monthDate, "LLLL yyyy", { locale: ru })}
               </h3>
               <div className="grid grid-cols-7 gap-px bg-border rounded-md overflow-hidden">
-                {WEEK_DAYS.map(d => (
-                  <div key={d} className="bg-muted py-1 text-center text-[10px] font-medium text-muted-foreground">{d}</div>
+                {WEEK_DAYS.map((d, index) => (
+                  <div key={d} className={cn(
+                    "bg-muted py-1 text-center text-[10px] font-medium text-muted-foreground",
+                    index >= 5 && "bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-300"
+                  )}>{d}</div>
                 ))}
                 {days.map((day, i) => (
                   <DayCell key={i} day={day} referenceMonth={monthDate} minH="min-h-14" tiny />

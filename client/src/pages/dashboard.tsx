@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, Users, Building2, CheckSquare, TrendingUp, Clock, X } from "lucide-react";
+import { Calendar, Users, Building2, CheckSquare, TrendingUp, Clock, X, MessageCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import type { TripWithDetails, TransportType, User } from "@shared/schema";
@@ -47,6 +47,12 @@ export default function Dashboard() {
     queryKey: [`/api/stats/dashboard/${user?.id}`],
     enabled: !!user,
     refetchOnWindowFocus: true,
+  });
+
+  const { data: unreadChat = { count: 0 } } = useQuery<{ count: number }>({
+    queryKey: ["/api/chat/unread-count"],
+    enabled: !!user,
+    refetchInterval: 10000,
   });
 
   const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo"].includes(user.role);
@@ -192,10 +198,21 @@ export default function Dashboard() {
             Обзор командировочной активности
           </p>
         </div>
-        <Button onClick={() => setLocation("/trips")} data-testid="button-new-trip" className="w-full md:w-auto">
-          <Building2 className="h-4 w-4 mr-2" />
-          Новая командировка
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+          <Button variant="outline" onClick={() => setLocation("/chat")} data-testid="button-chat" className="w-full sm:w-auto">
+            <MessageCircle className="h-4 w-4 mr-2" />
+            Чат
+            {unreadChat.count > 0 && (
+              <Badge variant="destructive" className="ml-1 min-w-5 justify-center px-1.5">
+                {unreadChat.count > 99 ? "99+" : unreadChat.count}
+              </Badge>
+            )}
+          </Button>
+          <Button onClick={() => setLocation("/trips")} data-testid="button-new-trip" className="w-full sm:w-auto">
+            <Building2 className="h-4 w-4 mr-2" />
+            Новая командировка
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:gap-4 grid-cols-2 md:grid-cols-2 lg:grid-cols-4">

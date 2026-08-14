@@ -172,8 +172,8 @@ export default function Approvals() {
   const rejectedCount = subordinateTrips.filter(t => t.status === "rejected").length;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold text-foreground">Согласование</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -230,25 +230,27 @@ export default function Approvals() {
       </div>
 
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4">
+        <CardHeader className="p-4 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle>Очередь согласования</CardTitle>
               <CardDescription>Заявки на командировки от подчиненных</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 border rounded-md px-2 py-1 bg-muted/20 mr-2">
-                <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
+              <div className="flex flex-col gap-1 rounded-md border bg-muted/20 p-2 sm:flex-row sm:items-center sm:gap-2 sm:px-2 sm:py-1">
+                <CalendarIcon className="hidden h-4 w-4 text-muted-foreground sm:block" />
                 <Input
                   type="date"
-                  className="h-8 w-36 border-0 bg-transparent p-0 focus-visible:ring-0 text-xs"
+                  aria-label="Дата начала периода"
+                  className="h-8 w-full border-0 bg-transparent p-0 text-xs focus-visible:ring-0 sm:w-36"
                   value={periodStart ? format(periodStart, "yyyy-MM-dd") : ""}
                   onChange={(e) => setPeriodStart(e.target.value ? new Date(e.target.value) : undefined)}
                 />
-                <span className="text-muted-foreground">—</span>
+                <span className="hidden text-muted-foreground sm:block">—</span>
                 <Input
                   type="date"
-                  className="h-8 w-36 border-0 bg-transparent p-0 focus-visible:ring-0 text-xs"
+                  aria-label="Дата окончания периода"
+                  className="h-8 w-full border-0 bg-transparent p-0 text-xs focus-visible:ring-0 sm:w-36"
                   value={periodEnd ? format(periodEnd, "yyyy-MM-dd") : ""}
                   onChange={(e) => setPeriodEnd(e.target.value ? new Date(e.target.value) : undefined)}
                 />
@@ -256,7 +258,7 @@ export default function Approvals() {
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="h-6 w-6" 
+                    className="h-8 w-full sm:h-6 sm:w-6" 
                     onClick={() => { setPeriodStart(undefined); setPeriodEnd(undefined); }}
                   >
                     <X className="h-3 w-3" />
@@ -264,7 +266,7 @@ export default function Approvals() {
                 )}
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-48" data-testid="select-approval-filter">
+                <SelectTrigger className="w-full sm:w-48" data-testid="select-approval-filter">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -299,10 +301,10 @@ export default function Approvals() {
           ) : (
             <Accordion type="single" collapsible className="w-full">
               {filteredTrips.map((trip) => (
-                <AccordionItem key={trip.id} value={trip.id} className="border rounded-md px-4 mb-2">
-                  <AccordionTrigger className="hover:no-underline">
-                    <div className="flex items-center justify-between w-full mr-4">
-                      <div className="flex items-center gap-4">
+                  <AccordionItem key={trip.id} value={trip.id} className="mb-2 rounded-md border px-3 sm:px-4">
+                    <AccordionTrigger className="hover:no-underline">
+                    <div className="mr-0 flex w-full min-w-0 items-start justify-between gap-2 sm:mr-4">
+                      <div className="flex min-w-0 items-center gap-2 sm:gap-4">
                         <div className="text-left">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium">{trip.employee?.fullName || "Неизвестный"}</span>

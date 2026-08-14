@@ -264,22 +264,22 @@ export default function Trips() {
   });
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Мои командировки</h1>
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-foreground sm:text-2xl">Мои командировки</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Управление вашими командировками
           </p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button data-testid="button-add-trip">
+            <Button className="w-full sm:w-auto" data-testid="button-add-trip">
               <Plus className="h-4 w-4 mr-2" />
               Создать командировку
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
             <DialogHeader>
               <DialogTitle>Создать командировку</DialogTitle>
               <DialogDescription>
@@ -383,7 +383,7 @@ export default function Trips() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Дата начала *</Label>
                   <Popover>
@@ -391,7 +391,7 @@ export default function Trips() {
                       <Button
                         variant="outline"
                         className={cn(
-                          "justify-start text-left font-normal",
+                          "w-full justify-start text-left font-normal",
                           !startDate && "text-muted-foreground"
                         )}
                         data-testid="button-start-date"
@@ -421,7 +421,7 @@ export default function Trips() {
                       <Button
                         variant="outline"
                         className={cn(
-                          "justify-start text-left font-normal",
+                          "w-full justify-start text-left font-normal",
                           !endDate && "text-muted-foreground"
                         )}
                         data-testid="button-end-date"
@@ -464,7 +464,7 @@ export default function Trips() {
               </div>
 
               {startDate && endDate && (
-                <div className="p-3 bg-muted/50 rounded-md border flex items-center justify-between">
+                <div className="flex flex-col items-start gap-2 rounded-md border bg-muted/50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2">
                     <Wallet className="h-4 w-4 text-primary" />
                     <span className="text-sm font-medium">Предварительный расчет суточных:</span>
@@ -475,11 +475,12 @@ export default function Trips() {
                 </div>
               )}
             </div>
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+            <DialogFooter className="flex-col gap-2 sm:flex-row">
+              <Button className="w-full sm:w-auto" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Отмена
               </Button>
               <Button 
+                className="w-full sm:w-auto"
                 variant="outline" 
                 onClick={() => handleSubmit("draft")}
                 disabled={createMutation.isPending}
@@ -488,6 +489,7 @@ export default function Trips() {
                 Сохранить черновик
               </Button>
               <Button 
+                className="w-full sm:w-auto"
                 onClick={() => handleSubmit("pending")}
                 disabled={createMutation.isPending}
                 data-testid="button-submit-trip"
@@ -521,25 +523,27 @@ export default function Trips() {
       </div>
 
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4">
+        <CardHeader className="p-4 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle>Список командировок</CardTitle>
               <CardDescription>Всего командировок: {trips.length}</CardDescription>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-2 border rounded-md px-2 py-1 bg-muted/20">
-                <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
+              <div className="flex flex-col gap-1 rounded-md border bg-muted/20 p-2 sm:flex-row sm:items-center sm:gap-2 sm:px-2 sm:py-1">
+                <CalendarIcon className="hidden h-4 w-4 text-muted-foreground sm:block" />
                 <Input
                   type="date"
-                  className="h-8 w-36 border-0 bg-transparent p-0 focus-visible:ring-0 text-xs"
+                  aria-label="Дата начала периода"
+                  className="h-8 w-full border-0 bg-transparent p-0 text-xs focus-visible:ring-0 sm:w-36"
                   value={periodStart ? format(periodStart, "yyyy-MM-dd") : ""}
                   onChange={(e) => setPeriodStart(e.target.value ? new Date(e.target.value) : undefined)}
                 />
-                <span className="text-muted-foreground">—</span>
+                <span className="hidden text-muted-foreground sm:block">—</span>
                 <Input
                   type="date"
-                  className="h-8 w-36 border-0 bg-transparent p-0 focus-visible:ring-0 text-xs"
+                  aria-label="Дата окончания периода"
+                  className="h-8 w-full border-0 bg-transparent p-0 text-xs focus-visible:ring-0 sm:w-36"
                   value={periodEnd ? format(periodEnd, "yyyy-MM-dd") : ""}
                   onChange={(e) => setPeriodEnd(e.target.value ? new Date(e.target.value) : undefined)}
                 />
@@ -547,7 +551,7 @@ export default function Trips() {
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="h-6 w-6" 
+                    className="h-8 w-full sm:h-6 sm:w-6" 
                     onClick={() => { setPeriodStart(undefined); setPeriodEnd(undefined); }}
                   >
                     <X className="h-3 w-3" />
@@ -555,7 +559,7 @@ export default function Trips() {
                 )}
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40" data-testid="select-status-filter">
+                <SelectTrigger className="w-full sm:w-40" data-testid="select-status-filter">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -567,7 +571,7 @@ export default function Trips() {
                   ))}
                 </SelectContent>
               </Select>
-              <div className="relative w-64">
+              <div className="relative w-full sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Поиск..."

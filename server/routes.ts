@@ -867,8 +867,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ REPORTS ============
   
+  const getReportDateRange = (query: any) => {
+    const now = new Date();
+    const fallbackStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const fallbackEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, "0")}`;
+    const startDate = typeof query.startDate === "string" ? query.startDate : fallbackStart;
+    const endDate = typeof query.endDate === "string" ? query.endDate : fallbackEnd;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+      return null;
+    }
+    return { startDate, endDate };
+  };
+
+  const formatReportDate = (date: string) => date.split("-").reverse().join(".");
+
   // Helper function to get report data
-  const getReportData = async (month: number, year: number) => {
+  const getReportData = async (periodStart: string, periodEnd: string) => {
     // Get all approved trips
     const allTrips = await storage.getTripsByStatus("approved");
     
@@ -876,12 +890,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const allowance = await storage.getDailyAllowance();
     const amountPerNight = parseInt(allowance?.amountPerNight || "1700");
     
-    // Filter trips by month/year
-    const tripsInMonth = await Promise.all(
+    // A trip belongs to the registry when it overlaps the requested period.
+    const tripsInPeriod = await Promise.all(
       allTrips
         .filter(trip => {
-          const startDate = new Date(trip.startDate);
-          return startDate.getMonth() + 1 === month && startDate.getFullYear() === year;
+          return trip.startDate <= periodEnd && trip.endDate >= periodStart;
         })
         .map(async (trip) => {
           const details = await storage.getTripWithDetails(trip.id);
@@ -900,7 +913,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
     );
     
-    const validTrips = tripsInMonth.filter(t => t !== null);
+    const validTrips = tripsInPeriod.filter(t => t !== null);
     
     // Split into two groups
     const withAllowance = validTrips.filter(t => t!.totalAllowance > 0);
@@ -911,8 +924,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const grandTotal = totalWithAllowance + totalWithoutAllowance;
 
     return {
-      month,
-      year,
+      periodStart,
+      periodEnd,
       amountPerNight,
       withAllowance: withAllowance.map((t, idx) => ({ ...t, number: idx + 1 })),
       withoutAllowance: withoutAllowance.map((t, idx) => ({ ...t, number: withAllowance.length + idx + 1 })),
@@ -922,13 +935,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   };
 
-  // Get trips report for month (with daily allowance calculation)
+  // Get trips report for a selected period (with daily allowance calculation)
   app.get("/api/admin/trips-report", requireCoordinatorOrAdmin, async (req, res) => {
     try {
-      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
-      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
-      
-      const data = await getReportData(month, year);
+      const period = getReportDateRange(req.query);
+      if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
+      const data = await getReportData(period.startDate, period.endDate);
       res.json(data);
     } catch (error) {
       console.error("Report error:", error);
@@ -939,12 +951,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Export trips report to Excel
   app.get("/api/admin/trips-report/export", requireCoordinatorOrAdmin, async (req, res) => {
     try {
-      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
-      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      const period = getReportDateRange(req.query);
+      if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
       
       console.log(`[EXPORT] Request received - session.userId: ${req.session.userId}, sessionID: ${req.sessionID}`);
-      console.log(`[EXPORT] Exporting report for month=${month}, year=${year}`);
-      const data = await getReportData(month, year);
+      console.log(`[EXPORT] Exporting report for ${period.startDate} to ${period.endDate}`);
+      const data = await getReportData(period.startDate, period.endDate);
       console.log(`[EXPORT] Report data ready: ${data.withAllowance.length} with allowance, ${data.withoutAllowance.length} without`);
       
       // Dynamically import ExcelJS
@@ -952,11 +964,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Реестр командировок");
       
-      const monthNames = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
-      
       // Title
       const titleRow = worksheet.addRow([
-        `Реестр командировок на ${monthNames[month]} ${year} г.`,
+        `Реестр командировок за период с ${formatReportDate(period.startDate)} по ${formatReportDate(period.endDate)}`,
       ]);
       titleRow.font = { bold: true, size: 14 };
       worksheet.mergeCells("A1:H1");
@@ -1071,7 +1081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Send file
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      const encodedFileName = encodeURIComponent(`Реестр_командировок_${monthNames[month]}_${year}.xlsx`);
+      const encodedFileName = encodeURIComponent(`Реестр_командировок_${period.startDate}_по_${period.endDate}.xlsx`);
       res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodedFileName}`);
       console.log(`[EXPORT] Sending file: ${encodedFileName}`);
       res.send(buffer);
@@ -1844,13 +1854,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ REPORTS ============
   
-  // Get trips report for month (with daily allowance calculation)
+  // Get trips report for a selected period (with daily allowance calculation)
   app.get("/api/admin/trips-report", requireCoordinatorOrAdmin, async (req, res) => {
     try {
-      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
-      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
-      
-      const data = await getReportData(month, year);
+      const period = getReportDateRange(req.query);
+      if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
+      const data = await getReportData(period.startDate, period.endDate);
       res.json(data);
     } catch (error) {
       console.error("Report error:", error);
@@ -1861,12 +1870,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Export trips report to Excel
   app.get("/api/admin/trips-report/export", requireCoordinatorOrAdmin, async (req, res) => {
     try {
-      const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
-      const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+      const period = getReportDateRange(req.query);
+      if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
       
       console.log(`[EXPORT] Request received - session.userId: ${req.session.userId}, sessionID: ${req.sessionID}`);
-      console.log(`[EXPORT] Exporting report for month=${month}, year=${year}`);
-      const data = await getReportData(month, year);
+      console.log(`[EXPORT] Exporting report for ${period.startDate} to ${period.endDate}`);
+      const data = await getReportData(period.startDate, period.endDate);
       console.log(`[EXPORT] Report data ready: ${data.withAllowance.length} with allowance, ${data.withoutAllowance.length} without`);
       
       // Dynamically import ExcelJS
@@ -1874,11 +1883,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Реестр командировок");
       
-      const monthNames = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
-      
       // Title
       const titleRow = worksheet.addRow([
-        `Реестр командировок на ${monthNames[month]} ${year} г.`,
+        `Реестр командировок за период с ${formatReportDate(period.startDate)} по ${formatReportDate(period.endDate)}`,
       ]);
       titleRow.font = { bold: true, size: 14 };
       worksheet.mergeCells("A1:H1");
@@ -1993,7 +2000,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Send file
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      const encodedFileName = encodeURIComponent(`Реестр_командировок_${monthNames[month]}_${year}.xlsx`);
+      const encodedFileName = encodeURIComponent(`Реестр_командировок_${period.startDate}_по_${period.endDate}.xlsx`);
       res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodedFileName}`);
       console.log(`[EXPORT] Sending file: ${encodedFileName}`);
       res.send(buffer);

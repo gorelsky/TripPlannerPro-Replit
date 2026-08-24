@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { StickyScrollTable } from "@/components/ui/sticky-scroll-table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Download, Loader2 } from "lucide-react";
@@ -12,8 +12,8 @@ import { ru } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 
 interface TripsReportData {
-  month: number;
-  year: number;
+  periodStart: string;
+  periodEnd: string;
   amountPerNight: number;
   withAllowance: any[];
   withoutAllowance: any[];
@@ -25,48 +25,37 @@ interface TripsReportData {
 export function TripsReport() {
   const { toast } = useToast();
   const currentDate = new Date();
-  const [month, setMonth] = useState(String(currentDate.getMonth() + 1));
-  const [year, setYear] = useState(String(currentDate.getFullYear()));
+  const [periodStart, setPeriodStart] = useState(format(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1), "yyyy-MM-dd"));
+  const [periodEnd, setPeriodEnd] = useState(format(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0), "yyyy-MM-dd"));
   const [isExporting, setIsExporting] = useState(false);
+  const isPeriodValid = Boolean(periodStart && periodEnd && periodStart <= periodEnd);
 
   const { data: report, isLoading } = useQuery<TripsReportData>({
-    queryKey: ["/api/admin/trips-report", month, year],
+    queryKey: ["/api/admin/trips-report", periodStart, periodEnd],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/trips-report?month=${month}&year=${year}`, { credentials: "include" });
+      const res = await fetch(`/api/admin/trips-report?startDate=${periodStart}&endDate=${periodEnd}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch report");
       return res.json();
     },
-    enabled: !!month && !!year,
-  });
-
-  const months = Array.from({ length: 12 }, (_, i) => ({
-    value: String(i + 1),
-    label: format(new Date(2024, i, 1), "LLLL", { locale: ru }),
-  }));
-
-  const years = Array.from({ length: 5 }, (_, i) => {
-    const y = currentDate.getFullYear() - 2 + i;
-    return { value: String(y), label: String(y) };
+    enabled: isPeriodValid,
   });
 
   const handleExportReport = () => {
-    if (!month || !year) return;
+    if (!isPeriodValid) {
+      toast({ title: "Проверьте период", description: "Дата окончания не может быть раньше даты начала.", variant: "destructive" });
+      return;
+    }
 
     setIsExporting(true);
     try {
-      console.log(`[EXPORT] Starting download for month=${month}, year=${year}`);
-      
-      // Use simple link navigation - browser automatically includes cookies
-      const monthNames = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
-      const filename = `Реестр_командировок_${monthNames[parseInt(month)]}_${year}.xlsx`;
+      const filename = `Реестр_командировок_${periodStart}_по_${periodEnd}.xlsx`;
       
       const link = document.createElement("a");
-      link.href = `/api/admin/trips-report/export?month=${month}&year=${year}`;
+      link.href = `/api/admin/trips-report/export?startDate=${periodStart}&endDate=${periodEnd}`;
       link.download = filename;
       link.style.display = "none";
       
       document.body.appendChild(link);
-      console.log(`[EXPORT] Clicking download link for: ${filename}`);
       link.click();
       document.body.removeChild(link);
       
@@ -92,48 +81,26 @@ export function TripsReport() {
         <CardHeader>
           <CardTitle>Реестр командировок</CardTitle>
           <CardDescription>
-            Формирование реестра команди ровок на выбранный месяц
+            Формирование реестра согласованных командировок за выбранный период
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
-                <label className="text-sm font-medium mb-2 block">Месяц</label>
-                <Select value={month} onValueChange={setMonth}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {months.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label className="mb-2 block text-sm font-medium">Начало периода</label>
+                <Input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} />
               </div>
 
               <div>
-                <label className="text-sm font-medium mb-2 block">Год</label>
-                <Select value={year} onValueChange={setYear}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {years.map((y) => (
-                      <SelectItem key={y.value} value={y.value}>
-                        {y.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label className="mb-2 block text-sm font-medium">Окончание периода</label>
+                <Input type="date" min={periodStart} value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} />
               </div>
 
               <div className="flex items-end">
                 <Button
                   onClick={handleExportReport}
-                  disabled={isExporting || (isLoading && !report)}
+                  disabled={!isPeriodValid || isExporting || (isLoading && !report)}
                   className="w-full"
                   data-testid="button-export-report"
                 >
@@ -320,7 +287,7 @@ export function TripsReport() {
               <Card>
                 <CardContent className="pt-6">
                   <p className="text-muted-foreground">
-                    Нет одобренных командировок на выбранный месяц
+                    Нет согласованных командировок за выбранный период
                   </p>
                 </CardContent>
               </Card>

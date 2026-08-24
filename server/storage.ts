@@ -249,7 +249,7 @@ export class PostgresStorage implements IStorage {
   }
 
   private readonly VALID_ROLES = [
-    "admin", "territorial_manager", "commercial_manager", "marketing_director",
+    "admin", "coordinator", "territorial_manager", "commercial_manager", "marketing_director",
     "sales_director", "commerce_director", "product_manager", "kam", "ceo", "deputy_ceo"
   ];
 
@@ -635,8 +635,7 @@ export class PostgresStorage implements IStorage {
     const result: TripWithDetails[] = [];
     const manager = await this.getUser(managerId);
     if (!manager) return result;
-    const isTerritorialManager = manager.role === "territorial_manager";
-    const isDirector = manager.role != null && ["sales_director", "commerce_director", "marketing_director"].includes(manager.role);
+    const isDepartmentLeader = manager.role != null && ["sales_director", "commerce_director", "marketing_director"].includes(manager.role);
     const isCeoOrAdmin = manager.role != null && ["ceo", "deputy_ceo", "admin"].includes(manager.role);
 
     // Statuses relevant for each role level:
@@ -646,11 +645,7 @@ export class PostgresStorage implements IStorage {
     // Each role sees trips they need to act on PLUS trips they have already acted on
     const relevantStatuses: string[] = isCeoOrAdmin
       ? ["pending", "manager_approved", "director_approved", "approved", "rejected"]
-      : isDirector
-        ? ["pending", "manager_approved", "director_approved", "approved", "rejected"]
-        : isTerritorialManager
-          ? ["pending", "manager_approved", "director_approved", "approved", "rejected"]
-          : ["pending", "manager_approved", "director_approved", "approved", "rejected"];
+      : ["pending", "manager_approved", "director_approved", "approved", "rejected"];
 
     for (const trip of allTrips) {
       if (!relevantStatuses.includes(trip.status)) continue;
@@ -663,14 +658,14 @@ export class PostgresStorage implements IStorage {
       if (isCeoOrAdmin) {
         // Администратор и CEO видят все поездки всех сотрудников включая свои
         result.push(details);
-      } else if (isTerritorialManager) {
-        // ТМ видит только прямых подчинённых (managerId = TM.id)
-        if (employee.managerId === managerId) {
+      } else if (isDepartmentLeader) {
+        // Руководитель отдела видит сотрудников своего отдела и прямых подчинённых.
+        if (employee.id !== managerId && (employee.managerId === managerId || employee.department === manager.department)) {
           result.push(details);
         }
-      } else {
-        // Директора и другие руководители видят весь отдел
-        if (employee.id !== managerId && (employee.managerId === managerId || employee.department === manager.department)) {
+      } else if (manager.userType === "manager") {
+        // Менеджер видит только прямых подчинённых (managerId = manager.id).
+        if (employee.managerId === managerId) {
           result.push(details);
         }
       }

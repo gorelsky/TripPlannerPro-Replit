@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/auth-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,8 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const [selectedStats, setSelectedStats] = useState<StatsFilter>(null);
+  const [nearestTripNotice, setNearestTripNotice] = useState<TripWithDetails | null>(null);
+  const shownTripNoticeForUser = useRef<string | null>(null);
   
   const { data: trips = [], isLoading: tripsLoading } = useQuery<TripWithDetails[]>({
     queryKey: ["/api/trips"],
@@ -56,6 +58,7 @@ export default function Dashboard() {
   });
 
   const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo"].includes(user.role);
+  const isCoordinator = user?.role === "coordinator";
 
   // Separate query for trips pending approval — uses server-side logic that correctly handles hierarchy
   const { data: approvalTripsData, isLoading: approvalTripsLoading } = useQuery<TripWithDetails[]>({
@@ -79,10 +82,30 @@ export default function Dashboard() {
     }
   }, [trips, refetchStats]);
 
-  const filteredTrips = trips.filter(trip => {
-    // На дашборде в списке "Последние командировки" для всех отображаем только личные записи
-    return trip.employeeId === user?.id;
-  });
+  useEffect(() => {
+    if (!user || tripsLoading || shownTripNoticeForUser.current === user.id) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const relevantStatuses = ["pending", "manager_approved", "director_approved", "approved"];
+    const visibleTrips = trips.filter((trip) => {
+      const isOwnTrip = trip.employeeId === user.id;
+      const canSeeSubordinateTrip = user.userType === "manager";
+      return relevantStatuses.includes(trip.status) && trip.endDate >= today && (isOwnTrip || canSeeSubordinateTrip);
+    });
+    const nearestTrip = visibleTrips.sort((first, second) => {
+      const firstIsActive = first.startDate <= today && first.endDate >= today;
+      const secondIsActive = second.startDate <= today && second.endDate >= today;
+      if (firstIsActive !== secondIsActive) return firstIsActive ? -1 : 1;
+      return first.startDate.localeCompare(second.startDate);
+    })[0];
+
+    shownTripNoticeForUser.current = user.id;
+    if (nearestTrip) setNearestTripNotice(nearestTrip);
+  }, [trips, tripsLoading, user]);
+
+  const filteredTrips = isCoordinator
+    ? trips
+    : trips.filter((trip) => trip.employeeId === user?.id);
 
   const recentTrips = filteredTrips.slice(0, 5);
 
@@ -338,6 +361,41 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      {nearestTripNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setNearestTripNotice(null)}>
+          <Card className="w-full max-w-md" onClick={(event) => event.stopPropagation()}>
+            <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
+              <div>
+                <CardTitle className="text-base">Ближайшая командировка</CardTitle>
+                <CardDescription className="mt-1 text-sm">
+                  {nearestTripNotice.startDate <= todayStr && nearestTripNotice.endDate >= todayStr ? "Командировка уже идёт" : "Следующая поездка в вашем плане"}
+                </CardDescription>
+              </div>
+              <Button variant="ghost" size="icon" aria-label="Закрыть уведомление" onClick={() => setNearestTripNotice(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {nearestTripNotice.employeeId !== user?.id && (
+                <p className="text-sm font-medium">Сотрудник: {nearestTripNotice.employee?.fullName || "Сотрудник"}</p>
+              )}
+              <div>
+                <p className="text-xs text-muted-foreground">Маршрут</p>
+                <p className="text-sm font-medium">{nearestTripNotice.route?.path || "Не указан"}</p>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 p-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Даты</p>
+                  <p className="text-sm font-medium">{formatDateShort(nearestTripNotice.startDate)} - {formatDateShort(nearestTripNotice.endDate)}</p>
+                </div>
+                <Badge variant="secondary" className={getStatusColor(nearestTripNotice.status)}>{statusLabels[nearestTripNotice.status]}</Badge>
+              </div>
+              <Button className="w-full" onClick={() => setNearestTripNotice(null)}>Понятно</Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Модальное окно с расшифровкой */}
       {selectedStats && (

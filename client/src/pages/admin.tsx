@@ -54,10 +54,12 @@ import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { roleLabels, roleShortLabels, determineRoleFromJobTitle } from "@/lib/role-utils";
 import { TripsReport } from "@/components/trips-report";
+import { scrollAppToTop } from "@/lib/scroll-utils";
 import type { User, City, UserRole, InsertUser, InsertCity, Route, DailyAllowance, Holiday, InsertHoliday, ContactMessage } from "@shared/schema";
 
 export default function Admin() {
   const { user, logout, switchUser } = useAuth();
+  const isCoordinator = user?.role === "coordinator";
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
@@ -803,26 +805,26 @@ export default function Admin() {
         </Card>
       )}
 
-      <Tabs defaultValue="users" className="w-full">
+      <Tabs defaultValue="users" className="w-full" onValueChange={scrollAppToTop}>
         <div className="sticky top-0 z-40 bg-background pb-3 -mx-4 px-4 pt-1 border-b mb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <TabsList className="grid h-auto w-full grid-cols-2 items-stretch gap-1 p-1 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10">
             <TabsTrigger value="users" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Пользователи</TabsTrigger>
             <TabsTrigger value="cities" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Города</TabsTrigger>
             <TabsTrigger value="routes" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Маршруты</TabsTrigger>
             <TabsTrigger value="holidays" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Праздники</TabsTrigger>
-            <TabsTrigger value="allowance" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Суточные</TabsTrigger>
+            {!isCoordinator && <TabsTrigger value="allowance" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Суточные</TabsTrigger>}
             <TabsTrigger value="report" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Реестр</TabsTrigger>
-            <TabsTrigger value="credentials" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Рассылка</TabsTrigger>
+            {!isCoordinator && <TabsTrigger value="credentials" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Рассылка</TabsTrigger>}
             <TabsTrigger value="testing" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">Тест</TabsTrigger>
-            <TabsTrigger value="messages" className="relative min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">
+            {!isCoordinator && <TabsTrigger value="messages" className="relative min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight sm:text-sm">
               Сообщения
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs rounded-full h-4 w-4 flex items-center justify-center font-bold">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
-            </TabsTrigger>
-            <TabsTrigger value="danger" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight text-destructive sm:text-sm">Опасно</TabsTrigger>
+            </TabsTrigger>}
+            {!isCoordinator && <TabsTrigger value="danger" className="min-w-0 whitespace-normal break-words px-2 py-2 text-xs leading-tight text-destructive sm:text-sm">Опасно</TabsTrigger>}
           </TabsList>
         </div>
 

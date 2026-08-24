@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Lock, Mail, Users, AlertCircle, Upload, X } from "lucide-react";
 import type { User } from "@shared/schema";
 import { roleLabels } from "@/lib/role-utils";
+import { scrollAppToTop } from "@/lib/scroll-utils";
 
 export default function Profile() {
   const { user: currentUser, logout } = useAuth();
@@ -173,7 +174,7 @@ export default function Profile() {
       </Card>
 
       {/* Tabs */}
-      <Tabs defaultValue="colleagues" className="w-full">
+      <Tabs defaultValue="colleagues" className="w-full" onValueChange={scrollAppToTop}>
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="colleagues" className="flex items-center gap-2">
             <Users className="w-4 h-4" />

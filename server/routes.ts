@@ -89,6 +89,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  const elevatedTripViewerRoles = new Set(["admin", "ceo", "deputy_ceo"]);
+  const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator"]);
+  const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
+
+  async function getVisibleTripsForUser(user: User): Promise<Trip[]> {
+    const allTrips = await storage.getAllTrips();
+    if (allTripsViewerRoles.has(user.role || "")) return allTrips;
+
+    const allowedEmployeeIds = new Set([user.id]);
+    if (user.userType === "manager") {
+      const allUsers = await storage.getAllUsers();
+      for (const candidate of allUsers) {
+        if (candidate.managerId === user.id) allowedEmployeeIds.add(candidate.id);
+        if (departmentLeaderRoles.has(user.role || "") && user.department && candidate.department === user.department) {
+          allowedEmployeeIds.add(candidate.id);
+        }
+      }
+    }
+
+    return allTrips.filter((trip) => allowedEmployeeIds.has(trip.employeeId));
+  }
+
+  async function applyTripFilters(trips: Trip[], query: Record<string, unknown>): Promise<Trip[]> {
+    const employeeId = typeof query.employeeId === "string" ? query.employeeId : undefined;
+    const status = typeof query.status === "string" ? query.status : undefined;
+    const cityId = typeof query.cityId === "string" ? query.cityId : undefined;
+    const department = typeof query.department === "string" ? query.department : undefined;
+    let filtered = trips;
+
+    if (employeeId) filtered = filtered.filter((trip) => trip.employeeId === employeeId);
+    if (status) filtered = filtered.filter((trip) => trip.status === status);
+    if (cityId) filtered = filtered.filter((trip) => trip.cityId === cityId);
+    if (department) {
+      const departmentUsers = await storage.getUsersByDepartment(department);
+      const departmentUserIds = new Set(departmentUsers.map((candidate) => candidate.id));
+      filtered = filtered.filter((trip) => departmentUserIds.has(trip.employeeId));
+    }
+    return filtered;
+  }
+
   // ============ AUTH ============
   
   // Login
@@ -179,14 +219,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const adminUser = await storage.getUser(req.session.userId);
       console.log(`[AUTH] Admin check: adminUser=${adminUser?.email}, role=${adminUser?.role}`);
       
-      if (!adminUser || adminUser.role !== "admin") {
-        return res.status(403).json({ error: "Only administrators can switch users" });
+      if (!adminUser || !["admin", "coordinator"].includes(adminUser.role || "")) {
+        return res.status(403).json({ error: "Only administrators or coordinators can switch users" });
       }
 
       // Get the target user
       const targetUser = await storage.getUser(userId);
       if (!targetUser) {
         return res.status(404).json({ error: "User not found" });
+      }
+      if (adminUser.role === "coordinator" && targetUser.userType === "manager") {
+        return res.status(403).json({ error: "Coordinator can switch only to employee test accounts" });
       }
 
       // Switch session to target user
@@ -230,7 +273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const role = currentUser.role;
       const utype = currentUser.userType;
 
-      if (role === "admin" || role === "ceo") {
+      if (role === "admin" || role === "ceo" || role === "coordinator") {
         // Full visibility
         users = await storage.getAllUsers();
 
@@ -327,7 +370,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create or update user (UPSERT on email) - admin only
-  app.post("/api/users", requireAdmin, async (req, res) => {
+  app.post("/api/users", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       console.log("[USERS] Create/Update user request:", JSON.stringify(req.body));
       const data = insertUserSchema.parse(req.body);
@@ -341,7 +384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update user (admin only)
-  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+  app.patch("/api/users/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const data = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(req.params.id, data);
@@ -355,7 +398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete user (admin only)
-  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/users/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteUser(req.params.id);
       if (!success) {
@@ -443,48 +486,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get all trips (with optional filters)
   app.get("/api/trips", async (req, res) => {
     try {
-      const { employeeId, status, cityId, department } = req.query;
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
-      
-      let trips;
-
-      // Session-based role check FIRST — prevents TM from seeing the whole department
-      if (currentUser?.role === "territorial_manager") {
-        // ТМ видит только свои поездки + прямых подчинённых (не весь отдел)
-        const ownTrips = await storage.getTripsByEmployee(currentUser.id);
-        const subordinateTrips = await storage.getTripsByManagerSubordinates(currentUser.id);
-        const approvalTrips = await storage.getTripsForApproval(currentUser.id);
-        const tripMap = new Map<string, any>();
-        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-        trips = Array.from(tripMap.values());
-      } else if (employeeId) {
-        trips = await storage.getTripsByEmployee(employeeId as string);
-      } else if (status) {
-        trips = await storage.getTripsByStatus(status as TripStatus);
-      } else if (cityId) {
-        trips = await storage.getTripsByCity(cityId as string);
-      } else if (department) {
-        trips = await storage.getTripsByDepartment(department as string);
-      } else if (currentUser) {
-        const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
-        if (elevatedRoles.includes(currentUser.role || "")) {
-          trips = await storage.getAllTrips();
-        } else if (currentUser.userType === "manager" && currentUser.id) {
-          const ownTrips = await storage.getTripsByEmployee(currentUser.id);
-          // Директора отдела и другие менеджеры видят весь отдел
-          const subordinateTrips = await storage.getTripsByDepartment(currentUser.department || "");
-          const approvalTrips = await storage.getTripsForApproval(currentUser.id);
-          const tripMap = new Map<string, any>();
-          [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-          trips = Array.from(tripMap.values());
-        } else if (currentUser.department) {
-          trips = await storage.getTripsByDepartment(currentUser.department);
-        } else {
-          trips = await storage.getTripsByEmployee(currentUser.id);
-        }
-      } else {
-        trips = await storage.getAllTrips();
-      }
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const trips = await applyTripFilters(await getVisibleTripsForUser(currentUser), req.query);
       
       // Enrich with details
       const tripsWithDetails = await Promise.all(
@@ -624,6 +628,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get trips for approval by manager
   app.get("/api/approvals/pending/:managerId", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      if (currentUser.id !== req.params.managerId && !elevatedTripViewerRoles.has(currentUser.role || "")) {
+        return res.status(403).json({ error: "You do not have access to these approvals" });
+      }
+      if (currentUser.userType !== "manager" && !elevatedTripViewerRoles.has(currentUser.role || "")) {
+        return res.status(403).json({ error: "Only managers can view approvals" });
+      }
       const trips = await storage.getTripsForApproval(req.params.managerId);
       res.json(trips);
     } catch (error) {
@@ -723,41 +735,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get dashboard stats
   app.get("/api/stats/dashboard/:userId", async (req, res) => {
     try {
-      const { userId } = req.params;
-      const user = await storage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-      let filteredTrips: Trip[] = [];
-      const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
-
-      if (elevatedRoles.includes(user.role || "")) {
-        filteredTrips = await storage.getAllTrips();
-      } else if (user.role === "territorial_manager") {
-        const ownTrips = await storage.getTripsByEmployee(user.id);
-        const subordinateTrips = await storage.getTripsByManagerSubordinates(user.id);
-        const approvalTrips = await storage.getTripsForApproval(user.id);
-        const tripMap = new Map<string, Trip>();
-        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-        filteredTrips = Array.from(tripMap.values());
-      } else if (user.userType === "manager") {
-        const ownTrips = await storage.getTripsByEmployee(user.id);
-        const departmentTrips = user.department ? await storage.getTripsByDepartment(user.department) : [];
-        const approvalTrips = await storage.getTripsForApproval(user.id);
-        const tripMap = new Map<string, Trip>();
-        [...ownTrips, ...departmentTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-        filteredTrips = Array.from(tripMap.values());
-      } else if (user.department) {
-        filteredTrips = await storage.getTripsByDepartment(user.department);
-      } else {
-        filteredTrips = await storage.getTripsByEmployee(user.id);
-      }
+      const user = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!user) return res.status(401).json({ error: "Not authenticated" });
+      const filteredTrips = await getVisibleTripsForUser(user);
       const now = new Date();
       now.setHours(0, 0, 0, 0);
       const nowStr = now.toISOString().split('T')[0];
 
       // Manager specific: trips from subordinates that need approval
-      const tripsForApproval = await storage.getTripsForApproval(userId);
+      const tripsForApproval = user.userType === "manager" || elevatedTripViewerRoles.has(user.role || "")
+        ? await storage.getTripsForApproval(user.id)
+        : [];
       const pendingStatuses = ["pending", "manager_approved", "director_approved"];
 
       res.json({
@@ -789,7 +777,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create route (admin only)
-  app.post("/api/routes", requireAdmin, async (req, res) => {
+  app.post("/api/routes", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       console.log("[ROUTES] Create route request, userId:", req.session.userId);
       console.log("[ROUTES] Create route request body:", JSON.stringify(req.body));
@@ -822,7 +810,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete route
-  app.delete("/api/routes/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/routes/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteRoute(req.params.id);
       if (!success) {
@@ -902,7 +890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Get trips report for month (with daily allowance calculation)
-  app.get("/api/admin/trips-report", requireAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
       const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
@@ -916,7 +904,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Export trips report to Excel
-  app.get("/api/admin/trips-report/export", requireAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report/export", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
       const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
@@ -1099,7 +1087,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/holidays", requireAdmin, async (req, res) => {
+  app.post("/api/holidays", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const parsed = insertHolidaySchema.safeParse(req.body);
       if (!parsed.success) {
@@ -1112,7 +1100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/holidays/:id", requireAdmin, async (req, res) => {
+  app.patch("/api/holidays/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const parsed = insertHolidaySchema.partial().safeParse(req.body);
       if (!parsed.success) {
@@ -1128,7 +1116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/holidays/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/holidays/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteHoliday(req.params.id);
       if (!success) {
@@ -1198,14 +1186,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const adminUser = await storage.getUser(req.session.userId);
       console.log(`[AUTH] Admin check: adminUser=${adminUser?.email}, role=${adminUser?.role}`);
       
-      if (!adminUser || adminUser.role !== "admin") {
-        return res.status(403).json({ error: "Only administrators can switch users" });
+      if (!adminUser || !["admin", "coordinator"].includes(adminUser.role || "")) {
+        return res.status(403).json({ error: "Only administrators or coordinators can switch users" });
       }
 
       // Get the target user
       const targetUser = await storage.getUser(userId);
       if (!targetUser) {
         return res.status(404).json({ error: "User not found" });
+      }
+      if (adminUser.role === "coordinator" && targetUser.userType === "manager") {
+        return res.status(403).json({ error: "Coordinator can switch only to employee test accounts" });
       }
 
       // Switch session to target user
@@ -1249,7 +1240,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const role = currentUser.role;
       const utype = currentUser.userType;
 
-      if (role === "admin" || role === "ceo") {
+      if (role === "admin" || role === "ceo" || role === "coordinator") {
         // Full visibility
         users = await storage.getAllUsers();
 
@@ -1322,7 +1313,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create or update user (UPSERT on email) - admin only
-  app.post("/api/users", requireAdmin, async (req, res) => {
+  app.post("/api/users", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       console.log("[USERS] Create/Update user request:", JSON.stringify(req.body));
       const data = insertUserSchema.parse(req.body);
@@ -1336,7 +1327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update user (admin only)
-  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+  app.patch("/api/users/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const data = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(req.params.id, data);
@@ -1350,7 +1341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete user (admin only)
-  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/users/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteUser(req.params.id);
       if (!success) {
@@ -1438,48 +1429,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get all trips (with optional filters)
   app.get("/api/trips", async (req, res) => {
     try {
-      const { employeeId, status, cityId, department } = req.query;
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
-      
-      let trips;
-
-      // Session-based role check FIRST — prevents TM from seeing the whole department
-      if (currentUser?.role === "territorial_manager") {
-        // ТМ видит только свои поездки + прямых подчинённых (не весь отдел)
-        const ownTrips = await storage.getTripsByEmployee(currentUser.id);
-        const subordinateTrips = await storage.getTripsByManagerSubordinates(currentUser.id);
-        const approvalTrips = await storage.getTripsForApproval(currentUser.id);
-        const tripMap = new Map<string, any>();
-        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-        trips = Array.from(tripMap.values());
-      } else if (employeeId) {
-        trips = await storage.getTripsByEmployee(employeeId as string);
-      } else if (status) {
-        trips = await storage.getTripsByStatus(status as TripStatus);
-      } else if (cityId) {
-        trips = await storage.getTripsByCity(cityId as string);
-      } else if (department) {
-        trips = await storage.getTripsByDepartment(department as string);
-      } else if (currentUser) {
-        const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
-        if (elevatedRoles.includes(currentUser.role || "")) {
-          trips = await storage.getAllTrips();
-        } else if (currentUser.userType === "manager" && currentUser.id) {
-          const ownTrips = await storage.getTripsByEmployee(currentUser.id);
-          // Директора отдела и другие менеджеры видят весь отдел
-          const subordinateTrips = await storage.getTripsByDepartment(currentUser.department || "");
-          const approvalTrips = await storage.getTripsForApproval(currentUser.id);
-          const tripMap = new Map<string, any>();
-          [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-          trips = Array.from(tripMap.values());
-        } else if (currentUser.department) {
-          trips = await storage.getTripsByDepartment(currentUser.department);
-        } else {
-          trips = await storage.getTripsByEmployee(currentUser.id);
-        }
-      } else {
-        trips = await storage.getAllTrips();
-      }
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const trips = await applyTripFilters(await getVisibleTripsForUser(currentUser), req.query);
       
       // Enrich with details
       const tripsWithDetails = await Promise.all(
@@ -1619,6 +1571,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get trips for approval by manager
   app.get("/api/approvals/pending/:managerId", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      if (currentUser.id !== req.params.managerId && !elevatedTripViewerRoles.has(currentUser.role || "")) {
+        return res.status(403).json({ error: "You do not have access to these approvals" });
+      }
+      if (currentUser.userType !== "manager" && !elevatedTripViewerRoles.has(currentUser.role || "")) {
+        return res.status(403).json({ error: "Only managers can view approvals" });
+      }
       const trips = await storage.getTripsForApproval(req.params.managerId);
       res.json(trips);
     } catch (error) {
@@ -1718,43 +1678,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get dashboard stats
   app.get("/api/stats/dashboard/:userId", async (req, res) => {
     try {
-      const { userId } = req.params;
-      const user = await storage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      let filteredTrips: Trip[] = [];
-      const elevatedRoles = ["admin", "ceo", "deputy_ceo"];
-
-      if (elevatedRoles.includes(user.role || "")) {
-        filteredTrips = await storage.getAllTrips();
-      } else if (user.role === "territorial_manager") {
-        const ownTrips = await storage.getTripsByEmployee(user.id);
-        const subordinateTrips = await storage.getTripsByManagerSubordinates(user.id);
-        const approvalTrips = await storage.getTripsForApproval(user.id);
-        const tripMap = new Map<string, Trip>();
-        [...ownTrips, ...subordinateTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-        filteredTrips = Array.from(tripMap.values());
-      } else if (user.userType === "manager") {
-        const ownTrips = await storage.getTripsByEmployee(user.id);
-        const departmentTrips = user.department ? await storage.getTripsByDepartment(user.department) : [];
-        const approvalTrips = await storage.getTripsForApproval(user.id);
-        const tripMap = new Map<string, Trip>();
-        [...ownTrips, ...departmentTrips, ...approvalTrips].forEach((trip) => tripMap.set(trip.id, trip));
-        filteredTrips = Array.from(tripMap.values());
-      } else if (user.department) {
-        filteredTrips = await storage.getTripsByDepartment(user.department);
-      } else {
-        filteredTrips = await storage.getTripsByEmployee(user.id);
-      }
+      const user = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!user) return res.status(401).json({ error: "Not authenticated" });
+      const filteredTrips = await getVisibleTripsForUser(user);
       
       const now = new Date();
       now.setHours(0, 0, 0, 0);
       const nowStr = now.toISOString().split('T')[0];
 
       // Manager specific: trips from subordinates that need approval
-      const tripsForApproval = await storage.getTripsForApproval(userId);
+      const tripsForApproval = user.userType === "manager" || elevatedTripViewerRoles.has(user.role || "")
+        ? await storage.getTripsForApproval(user.id)
+        : [];
       const pendingStatuses = ["pending", "manager_approved", "director_approved"];
 
       res.json({
@@ -1786,7 +1721,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create route (admin only)
-  app.post("/api/routes", requireAdmin, async (req, res) => {
+  app.post("/api/routes", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       console.log("[ROUTES] Create route request, userId:", req.session.userId);
       console.log("[ROUTES] Create route request body:", JSON.stringify(req.body));
@@ -1819,7 +1754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete route
-  app.delete("/api/routes/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/routes/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteRoute(req.params.id);
       if (!success) {
@@ -1844,7 +1779,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============ REPORTS ============
   
   // Get trips report for month (with daily allowance calculation)
-  app.get("/api/admin/trips-report", requireAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
       const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
@@ -1858,7 +1793,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Export trips report to Excel
-  app.get("/api/admin/trips-report/export", requireAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report/export", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
       const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
@@ -2041,7 +1976,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/holidays", requireAdmin, async (req, res) => {
+  app.post("/api/holidays", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const parsed = insertHolidaySchema.safeParse(req.body);
       if (!parsed.success) {
@@ -2054,7 +1989,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/holidays/:id", requireAdmin, async (req, res) => {
+  app.patch("/api/holidays/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const parsed = insertHolidaySchema.partial().safeParse(req.body);
       if (!parsed.success) {
@@ -2070,7 +2005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/holidays/:id", requireAdmin, async (req, res) => {
+  app.delete("/api/holidays/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteHoliday(req.params.id);
       if (!success) {
@@ -2158,6 +2093,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     return [...administratorContacts, ...otherContacts];
   };
+
+  async function requireCoordinatorOrAdmin(req: any, res: any, next: any) {
+    try {
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      const user = await storage.getUser(req.session.userId);
+      if (!user || !["admin", "coordinator"].includes(user.role || "")) {
+        return res.status(403).json({ error: "Only administrators or coordinators can manage this section" });
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ error: "Permission check failed" });
+    }
+  }
 
   app.get("/api/chat/contacts", async (req, res) => {
     try {

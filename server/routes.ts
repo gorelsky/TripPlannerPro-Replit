@@ -596,13 +596,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Update trip
   app.patch("/api/trips/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const existingTrip = await storage.getTrip(req.params.id);
+      if (!existingTrip) return res.status(404).json({ error: "Trip not found" });
+      if (existingTrip.employeeId !== currentUser.id) {
+        return res.status(403).json({ error: "Можно редактировать только собственный черновик" });
+      }
+      if (existingTrip.status !== "draft") {
+        return res.status(400).json({ error: "Редактировать можно только командировку в статусе «Черновик»" });
+      }
       const data = insertTripSchema.partial().parse(req.body);
       if (!isValidTrivioBookingUrl(data.trivioBookingUrl)) {
         return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
       }
-      const trip = await storage.updateTrip(req.params.id, data);
-      if (!trip) {
-        return res.status(404).json({ error: "Trip not found" });
+      if (data.employeeId && data.employeeId !== existingTrip.employeeId) {
+        return res.status(403).json({ error: "Нельзя изменить сотрудника в черновике" });
+      }
+      if (data.status && !["draft", "pending"].includes(data.status)) {
+        return res.status(400).json({ error: "Черновик можно сохранить или отправить на согласование" });
+      }
+
+      const nextStartDate = data.startDate || existingTrip.startDate;
+      const nextEndDate = data.endDate || existingTrip.endDate;
+      const existingTrips = await storage.getTripsByEmployee(existingTrip.employeeId);
+      const overlaps = existingTrips.some((trip) =>
+        trip.id !== existingTrip.id && nextStartDate <= trip.endDate && nextEndDate >= trip.startDate
+      );
+      if (overlaps) {
+        return res.status(400).json({ error: "Даты командировки пересекаются с другой командировкой" });
+      }
+
+      const { employeeId: _employeeId, ...changes } = data;
+      const trip = await storage.updateTrip(req.params.id, changes);
+      if (!trip) return res.status(404).json({ error: "Trip not found" });
+
+      if (trip.status === "pending") {
+        const employee = await storage.getUser(trip.employeeId);
+        if (employee?.managerId) {
+          await storage.createApproval({ tripId: trip.id, approverId: employee.managerId, status: "pending" });
+        }
       }
       
       const tripWithDetails = await storage.getTripWithDetails(trip.id);
@@ -1539,13 +1572,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Update trip
   app.patch("/api/trips/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const existingTrip = await storage.getTrip(req.params.id);
+      if (!existingTrip) return res.status(404).json({ error: "Trip not found" });
+      if (existingTrip.employeeId !== currentUser.id) {
+        return res.status(403).json({ error: "Можно редактировать только собственный черновик" });
+      }
+      if (existingTrip.status !== "draft") {
+        return res.status(400).json({ error: "Редактировать можно только командировку в статусе «Черновик»" });
+      }
       const data = insertTripSchema.partial().parse(req.body);
       if (!isValidTrivioBookingUrl(data.trivioBookingUrl)) {
         return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
       }
-      const trip = await storage.updateTrip(req.params.id, data);
-      if (!trip) {
-        return res.status(404).json({ error: "Trip not found" });
+      if (data.employeeId && data.employeeId !== existingTrip.employeeId) {
+        return res.status(403).json({ error: "Нельзя изменить сотрудника в черновике" });
+      }
+      if (data.status && !["draft", "pending"].includes(data.status)) {
+        return res.status(400).json({ error: "Черновик можно сохранить или отправить на согласование" });
+      }
+
+      const nextStartDate = data.startDate || existingTrip.startDate;
+      const nextEndDate = data.endDate || existingTrip.endDate;
+      const existingTrips = await storage.getTripsByEmployee(existingTrip.employeeId);
+      const overlaps = existingTrips.some((trip) =>
+        trip.id !== existingTrip.id && nextStartDate <= trip.endDate && nextEndDate >= trip.startDate
+      );
+      if (overlaps) {
+        return res.status(400).json({ error: "Даты командировки пересекаются с другой командировкой" });
+      }
+
+      const { employeeId: _employeeId, ...changes } = data;
+      const trip = await storage.updateTrip(req.params.id, changes);
+      if (!trip) return res.status(404).json({ error: "Trip not found" });
+
+      if (trip.status === "pending") {
+        const employee = await storage.getUser(trip.employeeId);
+        if (employee?.managerId) {
+          await storage.createApproval({ tripId: trip.id, approverId: employee.managerId, status: "pending" });
+        }
       }
       
       const tripWithDetails = await storage.getTripWithDetails(trip.id);

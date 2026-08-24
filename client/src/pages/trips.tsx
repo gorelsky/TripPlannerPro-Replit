@@ -35,7 +35,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Plus, Trash2, Search, Calendar as CalendarIcon, Send, MapPin, Wallet, X, ExternalLink, FileText, MoreHorizontal } from "lucide-react";
+import { Building2, Plus, Trash2, Search, Calendar as CalendarIcon, Send, MapPin, Wallet, X, ExternalLink, FileText, MoreHorizontal, Pencil } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -66,6 +66,7 @@ export default function Trips() {
   const [periodStart, setPeriodStart] = useState<Date>();
   const [periodEnd, setPeriodEnd] = useState<Date>();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingTrip, setEditingTrip] = useState<TripWithDetails | null>(null);
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
   const [routeSearch, setRouteSearch] = useState("");
@@ -192,6 +193,28 @@ export default function Trips() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: InsertTrip }) => apiRequest("PATCH", `/api/trips/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      setIsDialogOpen(false);
+      resetForm();
+      setEditingTrip(null);
+      toast({ title: "Успешно", description: "Черновик обновлен" });
+    },
+    onError: (error: any) => {
+      const rawMessage = error?.message || "";
+      const responseBody = rawMessage.replace(/^\d+:\s*/, "");
+      let message = "Не удалось обновить черновик";
+      try {
+        message = JSON.parse(responseBody).error || message;
+      } catch {
+        message = responseBody || message;
+      }
+      toast({ title: "Ошибка", description: message, variant: "destructive" });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/trips/${id}`),
     onSuccess: () => {
@@ -270,6 +293,10 @@ export default function Trips() {
       tripData.memoType = (unplannedScenario === "reschedule" ? "reschedule" : "unplanned") as TripMemoType;
       if (unplannedScenario === "reschedule") tripData.sourceTripId = sourceTripId;
     }
+    if (editingTrip) {
+      updateMutation.mutate({ id: editingTrip.id, data: tripData });
+      return;
+    }
     createMutation.mutate(tripData);
   };
 
@@ -316,6 +343,27 @@ export default function Trips() {
     setIsDialogOpen(true);
   };
 
+  const startEditDraft = (trip: TripWithDetails) => {
+    resetForm();
+    setEditingTrip(trip);
+    setFormData({
+      cityId: trip.cityId || "",
+      routeId: trip.routeId,
+      transportType: trip.transportType,
+      purpose: trip.purpose,
+      trivioBookingNumber: trip.trivioBookingNumber || "",
+      trivioBookingUrl: trip.trivioBookingUrl || "",
+      tripType: trip.tripType,
+      unplannedReason: trip.unplannedReason || "",
+    });
+    setUnplannedScenario(trip.memoType === "reschedule" ? "reschedule" : "new");
+    setSourceTripId(trip.sourceTripId || "");
+    setStartDate(new Date(`${trip.startDate}T00:00:00`));
+    setEndDate(new Date(`${trip.endDate}T00:00:00`));
+    setRouteSearch(trip.route.path);
+    setIsDialogOpen(true);
+  };
+
   const downloadMemo = async () => {
     if (!memoDialog) return;
     if (memoDialog.kind === "reschedule" && (!memoFields.newStartDate || !memoFields.newEndDate)) {
@@ -357,7 +405,13 @@ export default function Trips() {
             Управление вашими командировками
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            resetForm();
+            setEditingTrip(null);
+          }
+        }}>
           <DialogTrigger asChild>
             <Button className="w-full sm:w-auto" data-testid="button-add-trip">
               <Plus className="h-4 w-4 mr-2" />
@@ -366,9 +420,9 @@ export default function Trips() {
           </DialogTrigger>
           <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
             <DialogHeader>
-              <DialogTitle>Создать командировку</DialogTitle>
+              <DialogTitle>{editingTrip ? "Редактировать черновик" : "Создать командировку"}</DialogTitle>
               <DialogDescription>
-                Заполните информацию о планируемой командировке
+                {editingTrip ? "Скорректируйте данные и сохраните черновик или отправьте его на согласование" : "Заполните информацию о планируемой командировке"}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -632,19 +686,19 @@ export default function Trips() {
                 className="w-full sm:w-auto"
                 variant="outline" 
                 onClick={() => handleSubmit("draft")}
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || updateMutation.isPending}
                 data-testid="button-save-draft"
               >
-                Сохранить черновик
+                {updateMutation.isPending ? "Сохранение..." : "Сохранить черновик"}
               </Button>
               <Button 
                 className="w-full sm:w-auto"
                 onClick={() => handleSubmit("pending")}
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || updateMutation.isPending}
                 data-testid="button-submit-trip"
               >
                 <Send className="h-4 w-4 mr-2" />
-                {createMutation.isPending ? "Отправка..." : "Отправить на согласование"}
+                {createMutation.isPending || updateMutation.isPending ? "Отправка..." : "Отправить на согласование"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -854,7 +908,18 @@ export default function Trips() {
                               </DropdownMenuContent>
                             </DropdownMenu>
                     }
-                    {!(["rescheduling", "rejected"] as TripStatus[]).includes(trip.status) && (
+                    {trip.status === "draft" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 px-2"
+                        onClick={() => startEditDraft(trip)}
+                        aria-label="Редактировать черновик"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Редактировать
+                      </Button>
+                    ) : !(["rescheduling", "rejected"] as TripStatus[]).includes(trip.status) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="sm" className="h-8 gap-1 px-2" aria-label="Действия с командировкой">

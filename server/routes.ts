@@ -16,7 +16,7 @@ import {
   type User,
   type TripStatus 
 } from "@shared/schema";
-import { sendEmail, generateCredentialEmail, generateContactAdminEmail } from "./email-service";
+import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
@@ -2316,6 +2316,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fromUserId: currentUser.id,
         toUserId: recipientId,
         message,
+      });
+      void sendEmail({
+        to: recipient.email,
+        subject: "Новое сообщение в чате - Планировщик командировок",
+        html: generateChatNotificationEmail(recipient.fullName, currentUser.fullName),
       });
       res.status(201).json(savedMessage);
     } catch (error: any) {

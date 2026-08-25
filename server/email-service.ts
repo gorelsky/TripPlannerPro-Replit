@@ -1,7 +1,8 @@
 /**
  * Email service for sending credentials and notifications
- * Supports both mock mode (console) and real SMTP (via env variables)
+ * Supports both mock mode (console) and real SMTP (via env variables).
  */
+import nodemailer from "nodemailer";
 
 interface EmailOptions {
   to: string;
@@ -10,7 +11,7 @@ interface EmailOptions {
 }
 
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
-  // In development or when no SMTP is configured, log to console
+  // In development or when no SMTP is configured, log to console.
   if (!process.env.SMTP_HOST) {
     console.log("[EMAIL] Mock email service:");
     console.log(`To: ${options.to}`);
@@ -20,10 +21,60 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
     return true;
   }
 
-  // In production with SMTP configured, would use nodemailer
-  // For now, we'll just log
-  console.log(`[EMAIL] Would send email to ${options.to}`);
-  return true;
+  try {
+    const port = Number(process.env.SMTP_PORT || 587);
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port,
+      secure: process.env.SMTP_SECURE === "true" || port === 465,
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
+        : undefined,
+    });
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+    });
+    console.log(`[EMAIL] Sent email to ${options.to}`);
+    return true;
+  } catch (error) {
+    console.error(`[EMAIL] Failed to send email to ${options.to}`, error);
+    return false;
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    "\"": "&quot;",
+  })[character] || character);
+}
+
+export function generateChatNotificationEmail(recipientName: string, senderName: string): string {
+  const appUrl = process.env.APP_URL || "http://localhost:5000";
+  const chatUrl = `${appUrl.replace(/\/$/, "")}/chat`;
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+          <h2>Новое сообщение в чате</h2>
+          <p>Здравствуйте, ${escapeHtml(recipientName)}!</p>
+          <p>Вам написал(а) <strong>${escapeHtml(senderName)}</strong> в системе планирования командировок.</p>
+          <p style="margin: 24px 0;">
+            <a href="${chatUrl}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Открыть чат</a>
+          </p>
+          <p style="color: #666; font-size: 14px;">Текст сообщения в письме не отображается для сохранения конфиденциальности.</p>
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+          <p style="color: #999; font-size: 12px;">Это автоматическое уведомление. Пожалуйста, не отвечайте на него напрямую.</p>
+        </div>
+      </body>
+    </html>
+  `;
 }
 
 export function generateCredentialEmail(fullName: string, email: string, password: string): string {

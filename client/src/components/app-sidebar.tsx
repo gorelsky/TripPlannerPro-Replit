@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/auth-context";
 import { roleLabels } from "@/lib/role-utils";
 
@@ -71,6 +72,11 @@ const managementItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+  const { data: unreadChat = { count: 0 } } = useQuery<{ count: number }>({
+    queryKey: ["/api/chat/unread-count"],
+    enabled: Boolean(user),
+    refetchInterval: 10000,
+  });
 
   const filteredMenuItems = menuItems.filter(item => {
     if (item.url === "/approvals") {
@@ -109,6 +115,14 @@ export function AppSidebar() {
                     <Link href={item.url}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
+                      {item.url === "/chat" && unreadChat.count > 0 && (
+                        <span
+                          className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-bold text-destructive-foreground"
+                          aria-label={`Непрочитанных сообщений: ${unreadChat.count}`}
+                        >
+                          {unreadChat.count > 99 ? "99+" : unreadChat.count}
+                        </span>
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

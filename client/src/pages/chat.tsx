@@ -47,6 +47,12 @@ export default function Chat() {
     refetchInterval: 10000,
   });
 
+  useEffect(() => {
+    if (selectedUserId) {
+      queryClient.invalidateQueries({ queryKey: ["/api/chat/unread-count"] });
+    }
+  }, [messages, selectedUserId]);
+
   const selectedContact = contacts.find((contact) => contact.id === selectedUserId);
   const filteredContacts = contacts.filter((contact) => {
     const search = contactSearch.trim().toLocaleLowerCase("ru-RU");

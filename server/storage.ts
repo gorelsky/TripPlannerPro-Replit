@@ -73,6 +73,7 @@ export interface IStorage {
   updateTrip(id: string, trip: Partial<InsertTrip>): Promise<Trip | undefined>;
   deleteTrip(id: string): Promise<boolean>;
   deleteAllTrips(): Promise<void>;
+  clearAllTripAndCommunicationData(): Promise<void>;
 
   // Approvals
   getApproval(id: string): Promise<Approval | undefined>;
@@ -674,6 +675,16 @@ export class PostgresStorage implements IStorage {
 
   async deleteAllTrips(): Promise<void> {
     await db.delete(trips);
+  }
+
+  async clearAllTripAndCommunicationData(): Promise<void> {
+    await this.ensureChatTable();
+    await db.transaction(async (tx) => {
+      await tx.delete(approvals);
+      await tx.delete(chatMessages);
+      await tx.delete(contactMessages);
+      await tx.delete(trips);
+    });
   }
 
   // Approvals

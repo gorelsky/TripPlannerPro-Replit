@@ -859,9 +859,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/reset-trips", requireAdmin, async (req, res) => {
     try {
       await storage.deleteAllTrips();
-      res.json({ success: true, message: "All trips and approvals have been cleared" });
+      res.json({ success: true, message: "All trips have been cleared" });
     } catch (error) {
       res.status(500).json({ error: "Failed to reset trips" });
+    }
+  });
+
+  app.post("/api/admin/reset-all-trip-data", requireAdmin, async (_req, res) => {
+    try {
+      await storage.clearAllTripAndCommunicationData();
+      res.json({ success: true, message: "All trip, approval, chat, and contact data has been cleared" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reset trip and communication data" });
     }
   });
 

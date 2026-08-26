@@ -492,10 +492,28 @@ export default function Admin() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
       queryClient.invalidateQueries({ queryKey: ["/api/approvals/pending"] });
-      toast({ title: "Успешно", description: "Все командировки удалены" });
+      toast({ title: "Успешно", description: "Удалены только командировки" });
     },
     onError: () => {
       toast({ title: "Ошибка", description: "Не удалось сбросить данные", variant: "destructive" });
+    },
+  });
+
+  const resetAllTripDataMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/reset-all-trip-data"),
+    onSuccess: () => {
+      [
+        "/api/trips",
+        "/api/approvals/pending",
+        "/api/chat/contacts",
+        "/api/chat/unread-count",
+        "/api/admin/messages",
+        "/api/admin/messages/unread-count",
+      ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey: [queryKey] }));
+      toast({ title: "Успешно", description: "Командировки, согласования, чаты и обращения удалены" });
+    },
+    onError: () => {
+      toast({ title: "Ошибка", description: "Не удалось удалить данные", variant: "destructive" });
     },
   });
 
@@ -1995,32 +2013,62 @@ export default function Admin() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="p-4 border border-destructive/20 rounded-lg bg-destructive/5 flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium text-destructive">Обнулить все командировки</h4>
-                  <p className="text-sm text-muted-foreground">Удаляет все записи о командировках и их согласованиях из системы.</p>
-                </div>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="destructive" size="sm">
-                      <RotateCcw className="h-4 w-4 mr-2" />
-                      Обнулить данные
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Вы уверены?</DialogTitle>
-                      <DialogDescription>
-                        Это действие полностью очистит список командировок и историю согласований. Это действие невозможно отменить.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                      <Button variant="destructive" onClick={() => resetTripsMutation.mutate()} disabled={resetTripsMutation.isPending}>
-                        Да, удалить всё
+              <div className="space-y-3">
+                <div className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="font-medium text-destructive">Удалить все данные поездок и переписки</h4>
+                    <p className="text-sm text-muted-foreground">Удаляет командировки, согласования, сообщения чата и обращения к администратору. Пользователи и справочники останутся без изменений.</p>
+                  </div>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="destructive" size="sm">
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Удалить все
                       </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Удалить все данные поездок и переписки?</DialogTitle>
+                        <DialogDescription>
+                          Будут безвозвратно удалены командировки, согласования, сообщения чата и обращения к администратору. Пользователи, города, маршруты, праздники и суточные сохранятся.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter>
+                        <Button variant="destructive" onClick={() => resetAllTripDataMutation.mutate()} disabled={resetAllTripDataMutation.isPending}>
+                          Да, удалить все данные
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="font-medium text-destructive">Очистить только командировки</h4>
+                    <p className="text-sm text-muted-foreground">Удаляет только командировки. Согласования, чат, обращения к администратору и все справочники сохранятся.</p>
+                  </div>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="destructive" size="sm">
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Очистить командировки
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Очистить только командировки?</DialogTitle>
+                        <DialogDescription>
+                          Будут безвозвратно удалены только записи командировок. Согласования, сообщения чата, обращения к администратору, пользователи и справочники останутся без изменений.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter>
+                        <Button variant="destructive" onClick={() => resetTripsMutation.mutate()} disabled={resetTripsMutation.isPending}>
+                          Да, очистить командировки
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             </CardContent>
           </Card>

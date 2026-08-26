@@ -31,18 +31,31 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
         ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
         : undefined,
     });
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
-    });
-    console.log(`[EMAIL] Sent email to ${options.to}`);
-    return true;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          to: options.to,
+          subject: options.subject,
+          html: options.html,
+        });
+        console.log(`[EMAIL] Sent email to ${options.to}`);
+        return true;
+      } catch (error) {
+        if (attempt === 2) {
+          console.error(`[EMAIL] Failed to send email to ${options.to}`, error);
+          return false;
+        }
+        console.warn(`[EMAIL] First attempt failed for ${options.to}; retrying once.`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
   } catch (error) {
-    console.error(`[EMAIL] Failed to send email to ${options.to}`, error);
+    console.error(`[EMAIL] Failed to prepare email for ${options.to}`, error);
     return false;
   }
+
+  return false;
 }
 
 function escapeHtml(value: string): string {

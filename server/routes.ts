@@ -2334,8 +2334,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Not authenticated" });
       }
 
-      const count = await storage.getUnreadChatMessageCount(req.session.userId);
-      res.json({ count });
+      const unreadMessages = await storage.getUnreadChatMessages(req.session.userId);
+      const users = await storage.getAllUsers();
+      const usersById = new Map(users.map((user) => [user.id, user]));
+      const senders = Array.from(new Map(
+        unreadMessages
+          .map((message) => {
+            const sender = usersById.get(message.fromUserId);
+            return sender ? {
+              id: sender.id,
+              fullName: sender.fullName,
+              latestMessageId: message.id,
+              latestMessageAt: message.createdAt,
+            } : null;
+          })
+          .filter((sender): sender is NonNullable<typeof sender> => sender !== null)
+          .map((sender) => [sender.id, sender]),
+      ).values()).slice(0, 3);
+      res.json({ count: unreadMessages.length, senders });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to load unread chat count" });
     }

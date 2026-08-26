@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Building2, Calendar, Users, MapPin, LayoutDashboard, CheckSquare, Shield, LogOut, MessageCircle, BookOpen } from "lucide-react";
 import {
   Sidebar,
@@ -16,7 +17,18 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/hooks/use-toast";
 import { roleLabels } from "@/lib/role-utils";
+
+type ChatUnreadData = {
+  count: number;
+  senders: Array<{
+    id: string;
+    fullName: string;
+    latestMessageId: string;
+    latestMessageAt: string;
+  }>;
+};
 
 const menuItems = [
   {
@@ -72,11 +84,31 @@ const managementItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
-  const { data: unreadChat = { count: 0 } } = useQuery<{ count: number }>({
+  const { toast } = useToast();
+  const unreadNotificationRef = useRef<string | null>(null);
+  const { data: unreadChat = { count: 0, senders: [] } } = useQuery<ChatUnreadData>({
     queryKey: ["/api/chat/unread-count"],
     enabled: Boolean(user),
     refetchInterval: 10000,
   });
+
+  useEffect(() => {
+    const signature = unreadChat.senders.map((sender) => `${sender.id}:${sender.latestMessageId}`).join("|");
+    const isInitialLoad = unreadNotificationRef.current === null;
+    const hasNewMessage = unreadNotificationRef.current !== signature;
+    unreadNotificationRef.current = signature;
+
+    if (isInitialLoad || !hasNewMessage || unreadChat.count === 0 || unreadChat.senders.length === 0) return;
+
+    const [sender, ...otherSenders] = unreadChat.senders;
+    toast({
+      title: "Новое сообщение",
+      description: otherSenders.length > 0
+        ? `${sender.fullName} и еще ${otherSenders.length} отправитель(я) написали вам.`
+        : `${sender.fullName} написал(а) вам в чате.`,
+      duration: 8000,
+    });
+  }, [toast, unreadChat]);
 
   const filteredMenuItems = menuItems.filter(item => {
     if (item.url === "/approvals") {

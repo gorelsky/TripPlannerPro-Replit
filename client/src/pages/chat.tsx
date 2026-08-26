@@ -20,6 +20,11 @@ function formatTime(value: Date | string) {
   });
 }
 
+type ChatUnreadData = {
+  count: number;
+  senders: Array<{ id: string }>;
+};
+
 export default function Chat() {
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
@@ -29,6 +34,11 @@ export default function Chat() {
 
   const { data: contacts = [], isLoading: contactsLoading } = useQuery<User[]>({
     queryKey: ["/api/chat/contacts"],
+    enabled: Boolean(currentUser),
+    refetchInterval: 10000,
+  });
+  const { data: unreadChat = { count: 0, senders: [] } } = useQuery<ChatUnreadData>({
+    queryKey: ["/api/chat/unread-count"],
     enabled: Boolean(currentUser),
     refetchInterval: 10000,
   });
@@ -54,6 +64,7 @@ export default function Chat() {
   }, [messages, selectedUserId]);
 
   const selectedContact = contacts.find((contact) => contact.id === selectedUserId);
+  const unreadContactIds = new Set(unreadChat.senders.map((sender) => sender.id));
   const filteredContacts = contacts.filter((contact) => {
     const search = contactSearch.trim().toLocaleLowerCase("ru-RU");
     if (!search) return true;
@@ -135,19 +146,22 @@ export default function Chat() {
                   <p className="p-4 text-sm text-muted-foreground">Нет доступных контактов</p>
                 ) : (
                   <div className="p-2 space-y-1">
-                    {filteredContacts.map((contact) => (
-                      <button
+                    {filteredContacts.map((contact) => {
+                      const hasUnreadMessages = unreadContactIds.has(contact.id);
+                      return (
+                        <button
                         key={contact.id}
                         type="button"
                         onClick={() => setSelectedUserId(contact.id)}
                         className={`w-full rounded-md px-3 py-2 text-left hover-elevate ${selectedUserId === contact.id ? "bg-muted" : ""}`}
                       >
-                        <span className="block truncate text-sm font-medium">{contact.fullName}</span>
+                        <span className={`block truncate text-sm font-medium ${hasUnreadMessages ? "text-destructive" : ""}`}>{contact.fullName}</span>
                         <p className="truncate text-xs text-muted-foreground mt-1">
                           {contact.jobTitle || contact.department || "Сотрудник"}
                         </p>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

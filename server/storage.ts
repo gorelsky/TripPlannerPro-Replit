@@ -106,12 +106,12 @@ export interface IStorage {
   saveChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessagesBetweenUsers(firstUserId: string, secondUserId: string): Promise<ChatMessage[]>;
   getAllChatMessages(): Promise<ChatMessage[]>;
+  getUnreadChatMessages(userId: string): Promise<ChatMessage[]>;
   getUnreadChatMessageCount(userId: string): Promise<number>;
   markChatMessagesAsRead(recipientId: string, senderId: string): Promise<void>;
 }
 
 export class PostgresStorage implements IStorage {
-  private readonly ADMIN_PASSWORD = "Gorelsky@70719603";
   private initialized = false;
   private chatTableReady?: Promise<void>;
   private tripBookingColumnsReady?: Promise<void>;
@@ -304,32 +304,6 @@ export class PostgresStorage implements IStorage {
       await this.ensureTripBookingColumns();
       await this.ensureTripTypeColumns();
       await this.ensureTripMemoColumns();
-
-      // Create admin if not exists
-      const adminEmail = "admin@company.ru";
-      const adminExists = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, adminEmail))
-        .limit(1);
-
-      if (adminExists.length === 0) {
-        const adminId = randomUUID();
-        const adminHashedPassword = this.hashPassword(this.ADMIN_PASSWORD);
-        await db.insert(users).values({
-          id: adminId,
-          fullName: "Администратор",
-          email: adminEmail,
-          role: "admin" as any,
-          password: adminHashedPassword,
-          managerId: null,
-          managerName: null,
-          department: "Администрация",
-          jobTitle: "Администратор",
-          userType: "manager",
-        });
-        console.log(`[INIT] Admin created, password: ${this.ADMIN_PASSWORD}`);
-      }
 
       // Create cities if not exist
       const citiesCount = await db.select().from(cities);
@@ -870,6 +844,14 @@ export class PostgresStorage implements IStorage {
   async getAllChatMessages(): Promise<ChatMessage[]> {
     await this.ensureChatTable();
     return db.select().from(chatMessages).orderBy(sql`created_at DESC`);
+  }
+
+  async getUnreadChatMessages(userId: string): Promise<ChatMessage[]> {
+    await this.ensureChatTable();
+    return db.select()
+      .from(chatMessages)
+      .where(sql`to_user_id = ${userId} AND is_read = 'false'`)
+      .orderBy(sql`created_at DESC`);
   }
 
   async getUnreadChatMessageCount(userId: string): Promise<number> {

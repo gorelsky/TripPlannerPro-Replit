@@ -101,7 +101,9 @@ export default function Chat() {
       <div>
         <h1 className="text-xl font-semibold sm:text-2xl">Чат</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Коллеги вашего отдела и непосредственный руководитель
+          {currentUser.role === "coordinator"
+            ? "Все пользователи системы"
+            : "Коллеги вашего отдела и непосредственный руководитель"}
         </p>
         <p className="mt-2 text-sm text-muted-foreground">
           По вопросам работы приложения используйте раздел «Мой профиль» → «Связь с администратором».

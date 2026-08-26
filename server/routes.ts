@@ -2133,7 +2133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const getChatContacts = async (user: User) => {
     const users = await storage.getAllUsers();
 
-    if (user.role === "admin") {
+    if (["admin", "coordinator"].includes(user.role || "")) {
       return users
         .filter((candidate) => candidate.id !== user.id)
         .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));

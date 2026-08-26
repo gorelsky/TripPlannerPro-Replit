@@ -16,7 +16,7 @@ import {
   type User,
   type TripStatus 
 } from "@shared/schema";
-import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generateContactAdminEmail } from "./email-service";
+import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
@@ -2510,12 +2510,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const newPassword = generateRandomPassword(8);
           const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
+          const previousPasswordHash = user.password;
 
-          await sendEmail({
+          const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
+          if (!updatedUser) {
+            throw new Error("User was not found while updating the password");
+          }
+
+          const emailSent = await sendEmail({
             to: user.email,
             subject: "Учетные данные системы управления командировками",
             html: emailContent,
           });
+
+          if (!emailSent) {
+            await storage.restoreUserPasswordHash(user.id, previousPasswordHash);
+            throw new Error("Email delivery was not accepted; the previous password was restored");
+          }
 
           results.sent++;
           console.log(`[CREDENTIALS] Sent to ${user.email}`);
@@ -2533,6 +2544,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send credentials" });
+    }
+  });
+
+  // Reset one user's password and deliver it only to that user's work email.
+  app.post("/api/users/:id/reset-password", requireAdmin, async (req, res) => {
+    try {
+      const targetUser = await storage.getUser(req.params.id);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const newPassword = generateRandomPassword(8);
+      const previousPasswordHash = targetUser.password;
+      const updatedUser = await storage.updateUser(targetUser.id, { password: newPassword } as any);
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found while updating the password" });
+      }
+
+      const emailSent = await sendEmail({
+        to: targetUser.email,
+        subject: "Восстановление доступа к системе командировок",
+        html: generatePasswordResetEmail(targetUser.fullName, targetUser.email, newPassword),
+      });
+
+      if (!emailSent) {
+        await storage.restoreUserPasswordHash(targetUser.id, previousPasswordHash);
+        return res.status(502).json({
+          error: "Письмо не было принято почтовым сервером. Прежний пароль сохранен.",
+        });
+      }
+
+      console.log(`[PASSWORD RESET] Sent to ${targetUser.email}`);
+      res.json({ success: true, email: targetUser.email });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to reset password" });
     }
   });
 

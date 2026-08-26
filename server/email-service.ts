@@ -122,6 +122,29 @@ export function generateCredentialEmail(fullName: string, email: string, passwor
   `;
 }
 
+export function generatePasswordResetEmail(fullName: string, email: string, password: string): string {
+  const appUrl = process.env.APP_URL || "http://localhost:5000";
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+          <h2>Восстановление доступа к системе командировок</h2>
+          <p>Здравствуйте, ${escapeHtml(fullName)}!</p>
+          <p>Администратор сформировал для вас новый временный пароль для входа в систему.</p>
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>Email (логин):</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(email)}</code></p>
+            <p><strong>Временный пароль:</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(password)}</code></p>
+          </div>
+          <p style="color: #666; font-size: 14px;"><strong>Важно:</strong> после входа смените временный пароль в разделе «Мой профиль».</p>
+          <p>Ссылка на систему: <a href="${escapeHtml(appUrl)}">Перейти в систему</a></p>
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+          <p style="color: #999; font-size: 12px;">Это автоматическое письмо. Пожалуйста, не отвечайте на него напрямую.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export function generateContactAdminEmail(userName: string, userEmail: string, subject: string, message: string): string {
   return `
     <html>

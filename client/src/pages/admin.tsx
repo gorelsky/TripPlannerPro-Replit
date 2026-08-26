@@ -49,7 +49,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExcelJS from "exceljs";
-import { LogOut, Plus, Trash2, Copy, Download, ArrowRight, Upload, RotateCcw, AlertTriangle, FileUp, Pencil, Mail, MailOpen, Paperclip, ExternalLink } from "lucide-react";
+import { LogOut, Plus, Trash2, Copy, Download, ArrowRight, Upload, RotateCcw, AlertTriangle, FileUp, Pencil, KeyRound, Mail, MailOpen, Paperclip, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { roleLabels, roleShortLabels, determineRoleFromJobTitle } from "@/lib/role-utils";
@@ -63,6 +63,7 @@ export default function Admin() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [isSendingCredentials, setIsSendingCredentials] = useState(false);
 
   // ============ USERS ============
   const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
@@ -90,6 +91,7 @@ export default function Admin() {
   const [generatedPassword, setGeneratedPassword] = useState<{ userId: string; password: string } | null>(null);
   const [deleteConfirmDialog, setDeleteConfirmDialog] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
 
   const createUserMutation = useMutation({
     mutationFn: (data: InsertUser) => apiRequest("POST", "/api/users", data),
@@ -145,6 +147,20 @@ export default function Admin() {
     },
     onError: () => {
       toast({ title: "Ошибка", description: "Не удалось удалить пользователя", variant: "destructive" });
+    },
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest("POST", `/api/users/${id}/reset-password`, {});
+      return response.json() as Promise<{ email: string }>;
+    },
+    onSuccess: ({ email }) => {
+      setPasswordResetUser(null);
+      toast({ title: "Пароль сброшен", description: `Новый временный пароль отправлен на ${email}` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Не удалось сбросить пароль", description: error.message, variant: "destructive" });
     },
   });
 
@@ -1212,6 +1228,19 @@ export default function Admin() {
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
+                              {!isCoordinator && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setPasswordResetUser(u)}
+                                  disabled={resetPasswordMutation.isPending}
+                                  title="Сбросить пароль"
+                                  aria-label={`Сбросить пароль: ${u.fullName}`}
+                                  data-testid={`button-reset-password-${u.id}`}
+                                >
+                                  <KeyRound className="h-4 w-4" />
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1259,6 +1288,31 @@ export default function Admin() {
                   data-testid="button-confirm-delete"
                 >
                   {deleteUserMutation.isPending ? "Удаление..." : "Удалить"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <AlertDialog
+            open={Boolean(passwordResetUser)}
+            onOpenChange={(open) => {
+              if (!open && !resetPasswordMutation.isPending) setPasswordResetUser(null);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Сбросить пароль?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Для пользователя <strong>{passwordResetUser?.fullName}</strong> будет создан новый временный пароль и отправлен только на {passwordResetUser?.email}. Прежний пароль перестанет действовать лишь после успешной отправки письма.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={resetPasswordMutation.isPending}>Отмена</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => passwordResetUser && resetPasswordMutation.mutate(passwordResetUser.id)}
+                  disabled={resetPasswordMutation.isPending}
+                  data-testid="button-confirm-reset-password"
+                >
+                  {resetPasswordMutation.isPending ? "Отправка..." : "Сбросить и отправить"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1836,17 +1890,25 @@ export default function Admin() {
                   <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
                     <li>Кнопка ниже отправит письмо всем пользователям (кроме администраторов)</li>
                     <li>В письме будут их email и временный пароль (8 случайных символов)</li>
+                    <li>Пароль изменится только для тех писем, которые принял почтовый сервер</li>
                     <li>Пользователи смогут войти и сменить пароль в личном кабинете</li>
                   </ul>
                 </div>
                 <Button
                   onClick={() => {
                     if (window.confirm("Вы уверены? Письма будут отправлены всем пользователям.")) {
+                      setIsSendingCredentials(true);
                       apiRequest("POST", "/api/users/send-credentials", {})
-                        .then(() => {
+                        .then(async (response) => {
+                          const result = await response.json() as { results?: { sent: number; failed: number } };
+                          const sent = result.results?.sent ?? 0;
+                          const failed = result.results?.failed ?? 0;
                           toast({
-                            title: "Успешно",
-                            description: "Письма с учетными данными отправлены",
+                            title: failed > 0 ? "Рассылка завершена с ошибками" : "Рассылка завершена",
+                            description: failed > 0
+                              ? `Отправлено: ${sent}. Не отправлено: ${failed}; для них прежние пароли сохранены.`
+                              : `Отправлено писем: ${sent}.`,
+                            variant: failed > 0 ? "destructive" : "default",
                           });
                         })
                         .catch((err) => {
@@ -1855,13 +1917,15 @@ export default function Admin() {
                             description: err.response?.data?.error || "Не удалось отправить письма",
                             variant: "destructive",
                           });
-                        });
+                        })
+                        .finally(() => setIsSendingCredentials(false));
                     }
                   }}
                   className="w-full"
+                  disabled={isSendingCredentials}
                 >
                   <FileUp className="h-4 w-4 mr-2" />
-                  Отправить учетные данные всем
+                  {isSendingCredentials ? "Выполняется рассылка..." : "Отправить учетные данные всем"}
                 </Button>
               </div>
             </CardContent>

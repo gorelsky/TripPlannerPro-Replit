@@ -45,6 +45,7 @@ export interface IStorage {
   getUsersByDepartment(department: string): Promise<User[]>;
   createUser(user: InsertUser): Promise<{ user: User; password: string }>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
+  restoreUserPasswordHash(id: string, passwordHash: string): Promise<void>;
   deleteUser(id: string): Promise<boolean>;
   validatePassword(email: string, password: string): Promise<User | undefined>;
   clearNonAdminUsers(): Promise<void>;
@@ -416,6 +417,10 @@ export class PostgresStorage implements IStorage {
 
     await db.update(users).set(updateData).where(eq(users.id, id));
     return this.getUser(id);
+  }
+
+  async restoreUserPasswordHash(id: string, passwordHash: string): Promise<void> {
+    await db.update(users).set({ password: passwordHash }).where(eq(users.id, id));
   }
 
   async deleteUser(id: string): Promise<boolean> {

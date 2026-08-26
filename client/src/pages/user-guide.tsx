@@ -6,6 +6,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/auth-context";
 
 const trivioUrl = "https://login.trivio.ru/?toUrl=/desktop/info";
 
@@ -25,6 +26,9 @@ function StepList({ items }: { items: string[] }) {
 }
 
 export default function UserGuide() {
+  const { user } = useAuth();
+  const canViewRegistryGuide = user?.role === "admin" || user?.role === "coordinator";
+
   return (
     <div className="mx-auto w-full max-w-4xl space-y-5 sm:space-y-6">
       <div>
@@ -52,7 +56,7 @@ export default function UserGuide() {
         </div>
       </div>
 
-      <Accordion type="multiple" defaultValue={["start", "trip"]} className="w-full border-y">
+      <Accordion type="multiple" defaultValue={["start", "trip", "chat"]} className="w-full border-y">
         <AccordionItem value="start">
           <AccordionTrigger className="text-left text-base">Начало работы</AccordionTrigger>
           <AccordionContent>
@@ -64,6 +68,15 @@ export default function UserGuide() {
           </AccordionContent>
         </AccordionItem>
 
+        <AccordionItem value="roles">
+          <AccordionTrigger className="text-left text-base">Роли и доступ к данным</AccordionTrigger>
+          <AccordionContent className="space-y-2 text-sm leading-6 text-muted-foreground">
+            <p>Сотрудник видит только свои командировки. Руководитель видит свои поездки и поездки подчиненных в пределах своей структуры.</p>
+            <p>Генеральный директор, заместители генерального директора и администратор видят все командировки.</p>
+            <p>Координатор видит все поездки в дашборде и календаре, работает со справочниками, но не согласовывает командировки и не меняет суточные или рассылку.</p>
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="trip">
           <AccordionTrigger className="text-left text-base">Создание командировки</AccordionTrigger>
           <AccordionContent className="space-y-4">
@@ -72,12 +85,23 @@ export default function UserGuide() {
               "Выберите маршрут из списка, вид транспорта, даты и укажите цель поездки.",
               "При необходимости перейдите в Trivio, чтобы подобрать Ж/Д или авиабилеты и проживание.",
               "Вернитесь в заявку и добавьте номер бронирования и ссылку Trivio, если они уже есть.",
+              "Выберите тип: «Плановая» или «Внеплановая». Для внеплановой поездки укажите обоснование; при переносе выберите исходную командировку и причину переноса.",
               "Выберите «Сохранить черновик» либо «Отправить на согласование».",
             ]} />
             <div className="flex flex-wrap items-center gap-2 border-t pt-4 text-sm text-muted-foreground">
               <Plane className="h-4 w-4 text-primary" />
               <span>Субботы, воскресенья и праздники выделены розовым. Поездку на такую дату нужно подтвердить.</span>
             </div>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="memos">
+          <AccordionTrigger className="text-left text-base">Черновики и служебные записки</AccordionTrigger>
+          <AccordionContent className="space-y-3 text-sm leading-6 text-muted-foreground">
+            <p>Черновик можно открыть кнопкой «Редактировать», исправить маршрут, даты, цель, тип поездки и данные Trivio, а затем снова сохранить или отправить на согласование.</p>
+            <p>Для новой внеплановой командировки в меню «СЗ» доступна служебная записка на внеплановую поездку. ФИО, маршрут и даты подставляются автоматически.</p>
+            <p>Перенос оформляется созданием новой внеплановой поездки с выбором исходной. Для новой записи доступна СЗ на перенос, а исходная командировка получает статус переноса.</p>
+            <p>Для уже созданной поездки через «Действия» можно сформировать СЗ на отмену или изменение условий. Укажите требуемые причины и изменения в открывшейся форме.</p>
           </AccordionContent>
         </AccordionItem>
 
@@ -99,7 +123,7 @@ export default function UserGuide() {
             <div className="flex flex-wrap gap-2">
               <Badge variant="destructive">Отклонено</Badge><span>проверьте комментарий руководителя и создайте исправленную заявку при необходимости.</span>
             </div>
-            <p className="border-t pt-3">Руководители используют раздел «Согласование». Им доступны сведения о маршруте, датах, цели и бронировании Trivio.</p>
+            <p className="border-t pt-3">Руководители используют раздел «Согласование». Им доступны сведения о маршруте, датах, цели и бронировании Trivio. Координатор может просматривать поездки, но не согласовывает их.</p>
           </AccordionContent>
         </AccordionItem>
 
@@ -108,21 +132,34 @@ export default function UserGuide() {
           <AccordionContent className="space-y-2 text-sm leading-6 text-muted-foreground">
             <p>Переключайте месячный, недельный и квартальный вид, используйте стрелки для выбора периода.</p>
             <p>Нажмите на день, чтобы посмотреть запланированные поездки. Цветные метки внутри дня показывают статус командировки.</p>
-            <p>Доступные сотрудники и поездки зависят от вашей роли и организационной структуры.</p>
+            <p>Субботы, воскресенья и праздники выделены мягким розовым цветом. Доступные сотрудники и поездки зависят от вашей роли и организационной структуры.</p>
           </AccordionContent>
         </AccordionItem>
 
+        {canViewRegistryGuide && (
+          <AccordionItem value="registry">
+            <AccordionTrigger className="text-left text-base">Реестр командировок</AccordionTrigger>
+            <AccordionContent className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <p>Вкладка «Реестр» в разделе «Администратор» доступна администратору и координатору.</p>
+              <p>Укажите начало и окончание любого периода. В реестр попадут согласованные командировки, которые пересекаются с выбранными датами.</p>
+              <p>Кнопка «Скачать Excel» сформирует файл с тем же периодом в названии и заголовке.</p>
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
         <AccordionItem value="chat">
-          <AccordionTrigger className="text-left text-base">Чат и Trivio</AccordionTrigger>
+          <AccordionTrigger className="text-left text-base">Чат и уведомления</AccordionTrigger>
           <AccordionContent className="space-y-4 text-sm leading-6 text-muted-foreground">
             <div className="flex gap-2">
               <MessageCircle className="mt-1 h-4 w-4 shrink-0 text-primary" />
-              <p>В чате первым контактом указан Администратор. Далее доступны коллеги по вашему отделу и непосредственный руководитель. Красная цифра на дашборде показывает непрочитанные сообщения.</p>
+              <p>В чате первым контактом указан Администратор, далее доступны коллеги отдела и непосредственный руководитель. Координатор может выбрать любого пользователя системы.</p>
             </div>
             <div className="flex gap-2">
               <UserRound className="mt-1 h-4 w-4 shrink-0 text-primary" />
-              <p>По ошибкам приложения, доступам и исправлению данных используйте «Мой профиль» - «Связь с администратором».</p>
+              <p>Красная цифра возле «Чат» показывает общее число непрочитанных сообщений. При новом сообщении появится всплывающее окно с именем отправителя, а его ФИО в списке контактов станет красным.</p>
             </div>
+            <p>На настроенный рабочий e-mail приходит уведомление о новом сообщении без текста переписки. Откройте письмо и перейдите в чат по кнопке.</p>
+            <p>По ошибкам приложения, доступам и исправлению данных используйте раздел «Связь с администратором» в «Моём профиле».</p>
             <a
               href={trivioUrl}
               target="_blank"
@@ -142,6 +179,7 @@ export default function UserGuide() {
               {[
                 "Не удается войти: проверьте email и пароль, затем обратитесь к администратору.",
                 "Нет руководителя или коллег в чате: проверьте отдел и руководителя в профиле.",
+                "Нет уведомления о сообщении: обновите страницу, затем проверьте папку «Спам» рабочей почты.",
                 "Нет нужного маршрута: передайте администратору последовательность городов для добавления в справочник.",
                 "Изменения не видны: обновите страницу, при необходимости используйте Ctrl+F5.",
               ].map((item) => (

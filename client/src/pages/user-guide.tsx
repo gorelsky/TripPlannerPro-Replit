@@ -28,6 +28,7 @@ function StepList({ items }: { items: string[] }) {
 export default function UserGuide() {
   const { user } = useAuth();
   const canViewRegistryGuide = user?.role === "admin" || user?.role === "coordinator";
+  const canViewAnalyticsGuide = ["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user?.role || "");
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-5 sm:space-y-6">
@@ -154,6 +155,17 @@ export default function UserGuide() {
               <p>Вкладка «Реестр» в разделе «Администратор» доступна администратору и координатору.</p>
               <p>Укажите начало и окончание любого периода. В реестр попадут согласованные командировки, которые пересекаются с выбранными датами.</p>
               <p>Кнопка «Скачать Excel» сформирует файл с тем же периодом в названии и заголовке.</p>
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
+        {canViewAnalyticsGuide && (
+          <AccordionItem value="analytics">
+            <AccordionTrigger className="text-left text-base">Аналитика</AccordionTrigger>
+            <AccordionContent className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <p>Раздел «Аналитика» доступен администратору, координатору, генеральному директору и заместителям генерального директора.</p>
+              <p>Выберите произвольный период, чтобы увидеть динамику командировок, статусы, виды транспорта, рейтинги отделов и сотрудников, маршруты, нагрузку согласующих и обезличенную активность чата.</p>
+              <p>Показатель «Расчётные суточные» считается по действующему нормативу и числу ночей. Фактические расходы на билеты и проживание не включаются, поскольку они пока не вносятся в приложение.</p>
             </AccordionContent>
           </AccordionItem>
         )}

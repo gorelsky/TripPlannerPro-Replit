@@ -3,6 +3,7 @@ import type { UserRole } from "@shared/schema";
 export const roleLabels: Record<UserRole, string> = {
   admin: "Администратор",
   coordinator: "Координатор командировок",
+  accountant: "Бухгалтерия",
   territorial_manager: "Территориальный менеджер",
   commercial_manager: "Менеджер коммерческого отдела",
   marketing_director: "Директор маркетинга",
@@ -17,6 +18,7 @@ export const roleLabels: Record<UserRole, string> = {
 export const roleShortLabels: Record<UserRole, string> = {
   admin: "Admin",
   coordinator: "Коорд.",
+  accountant: "Бух.",
   territorial_manager: "ТМ",
   commercial_manager: "МК",
   marketing_director: "ДМ",
@@ -37,6 +39,7 @@ export function getRoleColor(role: UserRole | null | undefined): string {
   const colorMap: Record<UserRole, string> = {
     admin: "destructive",
     coordinator: "secondary",
+    accountant: "secondary",
     territorial_manager: "default",
     commercial_manager: "default",
     marketing_director: "default",

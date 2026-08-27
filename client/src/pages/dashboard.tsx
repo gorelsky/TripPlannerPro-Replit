@@ -59,6 +59,7 @@ export default function Dashboard() {
 
   const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo"].includes(user.role);
   const isCoordinator = user?.role === "coordinator";
+  const isAccountant = user?.role === "accountant";
 
   // Separate query for trips pending approval — uses server-side logic that correctly handles hierarchy
   const { data: approvalTripsData, isLoading: approvalTripsLoading } = useQuery<TripWithDetails[]>({
@@ -103,7 +104,7 @@ export default function Dashboard() {
     if (nearestTrip) setNearestTripNotice(nearestTrip);
   }, [trips, tripsLoading, user]);
 
-  const filteredTrips = isCoordinator
+  const filteredTrips = isCoordinator || isAccountant
     ? trips
     : trips.filter((trip) => trip.employeeId === user?.id);
 

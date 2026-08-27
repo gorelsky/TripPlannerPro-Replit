@@ -251,7 +251,7 @@ export class PostgresStorage implements IStorage {
   }
 
   private readonly VALID_ROLES = [
-    "admin", "coordinator", "territorial_manager", "commercial_manager", "marketing_director",
+    "admin", "coordinator", "accountant", "territorial_manager", "commercial_manager", "marketing_director",
     "sales_director", "commerce_director", "product_manager", "kam", "ceo", "deputy_ceo"
   ];
 

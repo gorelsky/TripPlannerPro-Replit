@@ -78,7 +78,7 @@ export default function CalendarView() {
 
   const filteredEmployees = employees.filter(emp => {
     if (!currentUser) return false;
-    if (currentUser.role === "admin" || currentUser.role === "coordinator") return true;
+    if (["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(currentUser.role || "")) return true;
     return emp.id === currentUser.id || emp.managerId === currentUser.id;
   });
 

@@ -90,7 +90,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   const elevatedTripViewerRoles = new Set(["admin", "ceo", "deputy_ceo"]);
-  const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator"]);
+  const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
 
   async function getVisibleTripsForUser(user: User): Promise<Trip[]> {
@@ -273,7 +273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const role = currentUser.role;
       const utype = currentUser.userType;
 
-      if (role === "admin" || role === "ceo" || role === "coordinator") {
+      if (role === "admin" || role === "ceo" || role === "coordinator" || role === "accountant") {
         // Full visibility
         users = await storage.getAllUsers();
 
@@ -945,7 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Get trips report for a selected period (with daily allowance calculation)
-  app.get("/api/admin/trips-report", requireCoordinatorOrAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report", requireRegistryAccess, async (req, res) => {
     try {
       const period = getReportDateRange(req.query);
       if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
@@ -958,7 +958,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Export trips report to Excel
-  app.get("/api/admin/trips-report/export", requireCoordinatorOrAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report/export", requireRegistryAccess, async (req, res) => {
     try {
       const period = getReportDateRange(req.query);
       if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
@@ -1292,7 +1292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const role = currentUser.role;
       const utype = currentUser.userType;
 
-      if (role === "admin" || role === "ceo" || role === "coordinator") {
+      if (role === "admin" || role === "ceo" || role === "coordinator" || role === "accountant") {
         // Full visibility
         users = await storage.getAllUsers();
 
@@ -1864,7 +1864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============ REPORTS ============
   
   // Get trips report for a selected period (with daily allowance calculation)
-  app.get("/api/admin/trips-report", requireCoordinatorOrAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report", requireRegistryAccess, async (req, res) => {
     try {
       const period = getReportDateRange(req.query);
       if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
@@ -1877,7 +1877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Export trips report to Excel
-  app.get("/api/admin/trips-report/export", requireCoordinatorOrAdmin, async (req, res) => {
+  app.get("/api/admin/trips-report/export", requireRegistryAccess, async (req, res) => {
     try {
       const period = getReportDateRange(req.query);
       if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
@@ -2188,6 +2188,200 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Permission check failed" });
     }
   }
+
+  async function requireRegistryAccess(req: any, res: any, next: any) {
+    try {
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      const user = await storage.getUser(req.session.userId);
+      if (!user || !["admin", "coordinator", "accountant"].includes(user.role || "")) {
+        return res.status(403).json({ error: "Registry is available only to administrators, coordinators and accounting" });
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ error: "Permission check failed" });
+    }
+  }
+
+  async function requireAnalyticsAccess(req: any, res: any, next: any) {
+    try {
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      const user = await storage.getUser(req.session.userId);
+      if (!user || !["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user.role || "")) {
+        return res.status(403).json({ error: "Analytics is available only to management" });
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ error: "Permission check failed" });
+    }
+  }
+
+  app.get("/api/analytics", requireAnalyticsAccess, async (req, res) => {
+    try {
+      const currentYear = new Date().getFullYear();
+      const from = typeof req.query.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)
+        ? req.query.from
+        : `${currentYear}-01-01`;
+      const to = typeof req.query.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
+        ? req.query.to
+        : `${currentYear}-12-31`;
+      if (from > to) return res.status(400).json({ error: "Дата начала периода не может быть позже даты окончания" });
+
+      const [allTrips, users, routes, approvals, chatMessages, contactMessages, allowance] = await Promise.all([
+        storage.getAllTrips(),
+        storage.getAllUsers(),
+        storage.getAllRoutes(),
+        Promise.all((await storage.getAllTrips()).map((trip) => storage.getApprovalsByTrip(trip.id))).then((items) => items.flat()),
+        storage.getAllChatMessages(),
+        storage.getAllContactMessages(),
+        storage.getDailyAllowance(),
+      ]);
+
+      const usersById = new Map(users.map((user) => [user.id, user]));
+      const routesById = new Map(routes.map((route) => [route.id, route]));
+      const tripsInPeriod = allTrips.filter((trip) => trip.startDate <= to && trip.endDate >= from);
+      const tripIds = new Set(tripsInPeriod.map((trip) => trip.id));
+      const allowancePerNight = Number(String(allowance?.amountPerNight || "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
+      const dateAtMidnight = (value: string) => new Date(`${value}T00:00:00`);
+      const tripDays = (trip: Trip) => Math.max(1, Math.round((dateAtMidnight(trip.endDate).getTime() - dateAtMidnight(trip.startDate).getTime()) / 86400000) + 1);
+      const tripNights = (trip: Trip) => Math.max(0, tripDays(trip) - 1);
+      const tripKilometers = (trip: Trip) => Number(String(routesById.get(trip.routeId)?.kilometers || "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
+      const increment = <T extends Record<string, number>>(collection: Map<string, T>, key: string, defaults: T) => {
+        const row = collection.get(key) || { ...defaults };
+        collection.set(key, row);
+        return row;
+      };
+
+      const departmentStats = new Map<string, { trips: number; approved: number; pending: number; days: number; estimatedCost: number; kilometers: number }>();
+      const employeeStats = new Map<string, { trips: number; approved: number; days: number; estimatedCost: number; kilometers: number }>();
+      const routeStats = new Map<string, { trips: number; kilometers: number }>();
+      const transport = { plane: 0, train: 0, car: 0 };
+      const statusCounts = new Map<string, number>();
+      const typeCounts = { planned: 0, unplanned: 0 };
+      const monthCounts = new Map<string, { total: number; planned: number; unplanned: number }>();
+
+      for (const trip of tripsInPeriod) {
+        const employee = usersById.get(trip.employeeId);
+        const department = employee?.department || "Без отдела";
+        const days = tripDays(trip);
+        const estimatedCost = tripNights(trip) * allowancePerNight;
+        const kilometers = tripKilometers(trip);
+        const departmentRow = increment(departmentStats, department, { trips: 0, approved: 0, pending: 0, days: 0, estimatedCost: 0, kilometers: 0 });
+        departmentRow.trips += 1;
+        departmentRow.approved += trip.status === "approved" ? 1 : 0;
+        departmentRow.pending += ["pending", "manager_approved", "director_approved"].includes(trip.status) ? 1 : 0;
+        departmentRow.days += days;
+        departmentRow.estimatedCost += estimatedCost;
+        departmentRow.kilometers += kilometers;
+        const employeeRow = increment(employeeStats, trip.employeeId, { trips: 0, approved: 0, days: 0, estimatedCost: 0, kilometers: 0 });
+        employeeRow.trips += 1;
+        employeeRow.approved += trip.status === "approved" ? 1 : 0;
+        employeeRow.days += days;
+        employeeRow.estimatedCost += estimatedCost;
+        employeeRow.kilometers += kilometers;
+        const routeName = routesById.get(trip.routeId)?.path || "Маршрут не указан";
+        const routeRow = increment(routeStats, routeName, { trips: 0, kilometers: 0 });
+        routeRow.trips += 1;
+        routeRow.kilometers += kilometers;
+        transport[trip.transportType] += 1;
+        statusCounts.set(trip.status, (statusCounts.get(trip.status) || 0) + 1);
+        typeCounts[trip.tripType] += 1;
+        const month = trip.startDate.slice(0, 7);
+        const monthRow = increment(monthCounts, month, { total: 0, planned: 0, unplanned: 0 });
+        monthRow.total += 1;
+        monthRow[trip.tripType] += 1;
+      }
+
+      const approvalsInPeriod = approvals.filter((approval) => tripIds.has(approval.tripId));
+      const resolvedApprovals = approvalsInPeriod.filter((approval) => approval.status !== "pending");
+      const averageApprovalHours = resolvedApprovals.length
+        ? Math.round(resolvedApprovals.reduce((total, approval) => total + Math.max(0, (new Date(approval.updatedAt).getTime() - new Date(approval.createdAt).getTime()) / 3600000), 0) / resolvedApprovals.length * 10) / 10
+        : 0;
+      const approvalRanking = new Map<string, { total: number; pending: number; resolved: number; averageHoursTotal: number; averageHoursCount: number }>();
+      for (const approval of approvalsInPeriod) {
+        const row = increment(approvalRanking, approval.approverId, { total: 0, pending: 0, resolved: 0, averageHoursTotal: 0, averageHoursCount: 0 });
+        row.total += 1;
+        if (approval.status === "pending") row.pending += 1;
+        else {
+          row.resolved += 1;
+          row.averageHoursTotal += Math.max(0, (new Date(approval.updatedAt).getTime() - new Date(approval.createdAt).getTime()) / 3600000);
+          row.averageHoursCount += 1;
+        }
+      }
+
+      const withinPeriod = (value: Date) => {
+        const day = new Date(value).toISOString().slice(0, 10);
+        return day >= from && day <= to;
+      };
+      const chatsInPeriod = chatMessages.filter((message) => withinPeriod(message.createdAt));
+      const contactsInPeriod = contactMessages.filter((message) => withinPeriod(message.createdAt));
+      const chatRanking = new Map<string, { sent: number; received: number; unread: number }>();
+      const chatDepartmentStats = new Map<string, number>();
+      for (const message of chatsInPeriod) {
+        const sender = usersById.get(message.fromUserId);
+        const recipient = usersById.get(message.toUserId);
+        increment(chatRanking, message.fromUserId, { sent: 0, received: 0, unread: 0 }).sent += 1;
+        const recipientRow = increment(chatRanking, message.toUserId, { sent: 0, received: 0, unread: 0 });
+        recipientRow.received += 1;
+        if (message.isRead === "false") recipientRow.unread += 1;
+        const department = sender?.department || recipient?.department || "Без отдела";
+        chatDepartmentStats.set(department, (chatDepartmentStats.get(department) || 0) + 1);
+      }
+
+      const mapToSorted = <T extends { trips?: number; sent?: number }>(entries: Array<[string, T]>, key: keyof T) => entries.sort((a, b) => Number(b[1][key] || 0) - Number(a[1][key] || 0));
+      const totalDays = tripsInPeriod.reduce((total, trip) => total + tripDays(trip), 0);
+      const totalEstimatedCost = tripsInPeriod.reduce((total, trip) => total + tripNights(trip) * allowancePerNight, 0);
+      const totalKilometers = tripsInPeriod.reduce((total, trip) => total + tripKilometers(trip), 0);
+
+      res.json({
+        period: { from, to },
+        summary: {
+          trips: tripsInPeriod.length,
+          approved: tripsInPeriod.filter((trip) => trip.status === "approved").length,
+          pending: tripsInPeriod.filter((trip) => ["pending", "manager_approved", "director_approved"].includes(trip.status)).length,
+          totalDays,
+          totalEstimatedCost,
+          totalKilometers,
+          chatMessages: chatsInPeriod.length,
+          unreadChatMessages: chatsInPeriod.filter((message) => message.isRead === "false").length,
+          contactMessages: contactsInPeriod.length,
+          averageApprovalHours,
+          allowancePerNight,
+        },
+        tripTypes: typeCounts,
+        transport,
+        statuses: Array.from(statusCounts, ([status, count]) => ({ status, count })),
+        monthly: Array.from(monthCounts, ([month, values]) => ({ month, ...values })).sort((a, b) => a.month.localeCompare(b.month)),
+        departments: mapToSorted(Array.from(departmentStats), "trips").map(([department, values]) => ({ department, ...values })),
+        employees: mapToSorted(Array.from(employeeStats), "trips").slice(0, 10).map(([employeeId, values]) => ({
+          employee: usersById.get(employeeId)?.fullName || "Неизвестный сотрудник", department: usersById.get(employeeId)?.department || "Без отдела", ...values,
+        })),
+        routes: mapToSorted(Array.from(routeStats), "trips").slice(0, 10).map(([route, values]) => ({ route, ...values })),
+        approvals: {
+          total: approvalsInPeriod.length,
+          pending: approvalsInPeriod.filter((approval) => approval.status === "pending").length,
+          resolved: resolvedApprovals.length,
+          ranking: Array.from(approvalRanking).map(([approverId, values]) => ({
+            approver: usersById.get(approverId)?.fullName || "Неизвестный пользователь",
+            total: values.total,
+            pending: values.pending,
+            resolved: values.resolved,
+            averageHours: values.averageHoursCount ? Math.round(values.averageHoursTotal / values.averageHoursCount * 10) / 10 : 0,
+          })).sort((a, b) => b.total - a.total).slice(0, 10),
+        },
+        chat: {
+          total: chatsInPeriod.length,
+          unread: chatsInPeriod.filter((message) => message.isRead === "false").length,
+          departmentActivity: Array.from(chatDepartmentStats, ([department, messages]) => ({ department, messages })).sort((a, b) => b.messages - a.messages),
+          ranking: Array.from(chatRanking).map(([userId, values]) => ({
+            user: usersById.get(userId)?.fullName || "Неизвестный пользователь", department: usersById.get(userId)?.department || "Без отдела", ...values,
+          })).sort((a, b) => b.sent - a.sent).slice(0, 10),
+        },
+      });
+    } catch (error: any) {
+      console.error("[ANALYTICS] Failed to build analytics", error);
+      res.status(500).json({ error: "Не удалось сформировать аналитику" });
+    }
+  });
 
   app.get("/api/chat/contacts", async (req, res) => {
     try {

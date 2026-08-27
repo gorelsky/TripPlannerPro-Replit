@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Building2, Calendar, Users, MapPin, LayoutDashboard, CheckSquare, Shield, LogOut, MessageCircle, BookOpen } from "lucide-react";
+import { Building2, Calendar, Users, MapPin, LayoutDashboard, CheckSquare, Shield, LogOut, MessageCircle, BookOpen, BarChart3, ClipboardList } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -66,6 +66,16 @@ const menuItems = [
     url: "/guide",
     icon: BookOpen,
   },
+  {
+    title: "Аналитика",
+    url: "/analytics",
+    icon: BarChart3,
+  },
+  {
+    title: "Реестр",
+    url: "/registry",
+    icon: ClipboardList,
+  },
 ];
 
 const managementItems = [
@@ -114,6 +124,12 @@ export function AppSidebar() {
     if (item.url === "/approvals") {
       // Только роли с подчиненными видят раздел согласования
       return user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin"].includes(user.role);
+    }
+    if (item.url === "/analytics") {
+      return user && ["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user.role || "");
+    }
+    if (item.url === "/registry") {
+      return user?.role === "accountant";
     }
     return true;
   });

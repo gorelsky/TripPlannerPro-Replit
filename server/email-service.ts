@@ -91,27 +91,28 @@ export function generateChatNotificationEmail(recipientName: string, senderName:
 }
 
 export function generateCredentialEmail(fullName: string, email: string, password: string): string {
+  const appUrl = process.env.APP_URL || "http://localhost:5000";
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
-          <h2>Добро пожаловать в систему управления командировками!</h2>
-          
-          <p>Здравствуйте, ${fullName}!</p>
-          
-          <p>Вы были добавлены в систему. Ниже ваши учетные данные для входа:</p>
-          
+          <h2>Запуск тестового периода приложения для командировок</h2>
+          <p>Добрый день, ${escapeHtml(fullName)}!</p>
+          <p>С 31 августа 2026 года запускается тестовый период нового приложения для планирования и согласования командировок.</p>
+          <p>Тестирование продлится 10 календарных дней, до 9 сентября включительно. В этот период можно ознакомиться с созданием плановых и внеплановых командировок, согласованием, календарём, чатом, Trivio и служебными записками.</p>
+          <p>Направляйте рациональные предложения по удобству работы и оптимизации через «Мой профиль» → «Связь с администратором» либо на <a href="mailto:admin.tripplanner@sls-pharma.ru">admin.tripplanner@sls-pharma.ru</a>.</p>
+          <p>После завершения тестирования все тестовые командировки, согласования и сообщения будут очищены. С 14 сентября 2026 года все новые командировки необходимо будет оформлять через приложение.</p>
+          <p>Ниже указаны ваши персональные данные для входа:</p>
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p><strong>Email (Логин):</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${email}</code></p>
-            <p><strong>Пароль:</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${password}</code></p>
+            <p><strong>Email (логин):</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(email)}</code></p>
+            <p><strong>Временный пароль:</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(password)}</code></p>
           </div>
-          
           <p style="color: #666; font-size: 14px;">
-            <strong>Внимание:</strong> Пожалуйста, смените пароль после первого входа в систему для безопасности.
+            <strong>Важно:</strong> после первого входа смените временный пароль в разделе «Мой профиль» → «Пароль».
           </p>
-          
-          <p>Ссылка на систему: <a href="${process.env.APP_URL || 'http://localhost:5000'}">Перейти в систему</a></p>
-          
+          <p style="margin: 24px 0;"><a href="${escapeHtml(appUrl)}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Перейти в приложение</a></p>
+          <p>Инструкция по работе доступна в приложении в разделе «Инструкция».</p>
+          <p>С уважением,<br>Администратор приложения</p>
           <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
           <p style="color: #999; font-size: 12px;">
             Это автоматическое письмо. Пожалуйста, не отвечайте на него напрямую.

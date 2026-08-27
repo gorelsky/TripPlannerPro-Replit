@@ -2519,7 +2519,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const emailSent = await sendEmail({
             to: user.email,
-            subject: "Учетные данные системы управления командировками",
+            subject: "Тестовый период приложения для командировок: доступ к системе",
             html: emailContent,
           });
 

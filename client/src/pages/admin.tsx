@@ -1878,9 +1878,9 @@ export default function Admin() {
         <TabsContent value="credentials">
           <Card>
             <CardHeader>
-              <CardTitle>Рассылка учетных данных</CardTitle>
+              <CardTitle>Рассылка запуска тестирования и учетных данных</CardTitle>
               <CardDescription>
-                Отправить логин и пароль всем пользователям по электронной почте
+                Отправить объявление о тестовом периоде, ссылку на приложение, логин и временный пароль
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1888,15 +1888,15 @@ export default function Admin() {
                 <div className="p-4 border rounded-lg bg-muted">
                   <p className="text-sm font-medium mb-2">Как это работает:</p>
                   <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                    <li>Кнопка ниже отправит письмо всем пользователям (кроме администраторов)</li>
-                    <li>В письме будут их email и временный пароль (8 случайных символов)</li>
+                    <li>Кнопка ниже отправит персональное письмо всем пользователям, кроме администраторов</li>
+                    <li>В письме будут сроки тестового периода, ссылка на приложение, email и временный пароль</li>
                     <li>Пароль изменится только для тех писем, которые принял почтовый сервер</li>
                     <li>Пользователи смогут войти и сменить пароль в личном кабинете</li>
                   </ul>
                 </div>
                 <Button
                   onClick={() => {
-                    if (window.confirm("Вы уверены? Письма будут отправлены всем пользователям.")) {
+                    if (window.confirm("Вы уверены? Всем пользователям будут отправлены объявление о тестовом периоде и новые временные пароли.")) {
                       setIsSendingCredentials(true);
                       apiRequest("POST", "/api/users/send-credentials", {})
                         .then(async (response) => {
@@ -1925,7 +1925,7 @@ export default function Admin() {
                   disabled={isSendingCredentials}
                 >
                   <FileUp className="h-4 w-4 mr-2" />
-                  {isSendingCredentials ? "Выполняется рассылка..." : "Отправить учетные данные всем"}
+                  {isSendingCredentials ? "Выполняется рассылка..." : "Отправить письмо о запуске всем"}
                 </Button>
               </div>
             </CardContent>

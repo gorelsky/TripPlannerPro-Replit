@@ -68,6 +68,17 @@ export default function UserGuide() {
           </AccordionContent>
         </AccordionItem>
 
+        <AccordionItem value="password">
+          <AccordionTrigger className="text-left text-base">Смена и восстановление пароля</AccordionTrigger>
+          <AccordionContent className="space-y-4">
+            <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <p>Чтобы сменить известный пароль, откройте «Мой профиль» → «Пароль», введите текущий пароль, новый пароль и его подтверждение, затем нажмите «Изменить пароль».</p>
+              <p>Если пароль забыт, на странице входа нажмите «Забыли пароль?». Откроется новое письмо в почтовом клиенте с адресатом <strong>admin.tripplanner@sls-pharma.ru</strong> и автоматически добавленной корпоративной подписью.</p>
+              <p>Администратор сформирует временный пароль только для вашей учётной записи и отправит его на рабочую почту. После входа сразу смените временный пароль в «Моём профиле».</p>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="roles">
           <AccordionTrigger className="text-left text-base">Роли и доступ к данным</AccordionTrigger>
           <AccordionContent className="space-y-2 text-sm leading-6 text-muted-foreground">
@@ -177,7 +188,7 @@ export default function UserGuide() {
           <AccordionContent>
             <div className="space-y-2 text-sm leading-6 text-muted-foreground">
               {[
-                "Не удается войти: проверьте email и пароль, затем обратитесь к администратору.",
+                "Не удается войти или пароль забыт: нажмите «Забыли пароль?» на странице входа и отправьте запрос администратору.",
                 "Нет руководителя или коллег в чате: проверьте отдел и руководителя в профиле.",
                 "Нет уведомления о сообщении: обновите страницу, затем проверьте папку «Спам» рабочей почты.",
                 "Нет нужного маршрута: передайте администратору последовательность городов для добавления в справочник.",

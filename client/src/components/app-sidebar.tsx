@@ -122,8 +122,8 @@ export function AppSidebar() {
 
   const filteredMenuItems = menuItems.filter(item => {
     if (item.url === "/approvals") {
-      // Только роли с подчиненными видят раздел согласования
-      return user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin"].includes(user.role);
+      // Раздел доступен всем руководителям, в том числе импортированным с общей ролью manager.
+      return user?.userType === "manager";
     }
     if (item.url === "/analytics") {
       return user && ["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user.role || "");

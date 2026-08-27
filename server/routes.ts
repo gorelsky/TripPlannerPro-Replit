@@ -26,8 +26,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     fs.mkdirSync(attachmentsDir, { recursive: true });
   }
   app.use("/uploads/contact-screenshots", (req, res, next) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
     const fileName = decodeURIComponent(req.path).replace(/^\/+/, "");
     const filePath = path.join(attachmentsDir, fileName);
+    if (path.relative(attachmentsDir, filePath).startsWith("..") || path.isAbsolute(fileName)) {
+      return res.status(400).json({ error: "Invalid file path" });
+    }
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "File not found" });
     }
@@ -92,6 +98,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const elevatedTripViewerRoles = new Set(["admin", "ceo", "deputy_ceo"]);
   const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
+
+  function withoutPassword<T extends { password?: unknown }>(user: T) {
+    const { password: _password, ...safeUser } = user;
+    return safeUser;
+  }
 
   async function getVisibleTripsForUser(user: User): Promise<Trip[]> {
     const allTrips = await storage.getAllTrips();
@@ -316,7 +327,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = await storage.getAllUsers();
       }
 
-      res.json(users.sort((first, second) => first.fullName.localeCompare(second.fullName, "ru")));
+      res.json(users
+        .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"))
+        .map(withoutPassword));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch users" });
     }
@@ -325,11 +338,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get user by ID
   app.get("/api/users/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const visibleUsers = await (async () => {
+        const all = await storage.getAllUsers();
+        if (allTripsViewerRoles.has(currentUser.role || "")) return all;
+        if (currentUser.id === req.params.id) return [currentUser];
+        return (await storage.getUsersByManager(currentUser.managerId || "")).concat(
+          currentUser.managerId ? [await storage.getUser(currentUser.managerId)].filter(Boolean) as User[] : [],
+        );
+      })();
+      if (!visibleUsers.some((candidate) => candidate.id === req.params.id)) {
+        return res.status(403).json({ error: "You do not have access to this user" });
+      }
       const user = await storage.getUser(req.params.id);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      res.json(user);
+      res.json(withoutPassword(user));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch user" });
     }
@@ -437,7 +463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create city
-  app.post("/api/cities", async (req, res) => {
+  app.post("/api/cities", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const data = insertCitySchema.parse(req.body);
       
@@ -455,7 +481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update city
-  app.patch("/api/cities/:id", async (req, res) => {
+  app.patch("/api/cities/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const data = insertCitySchema.partial().parse(req.body);
       const city = await storage.updateCity(req.params.id, data);
@@ -469,7 +495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete city
-  app.delete("/api/cities/:id", async (req, res) => {
+  app.delete("/api/cities/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteCity(req.params.id);
       if (!success) {
@@ -504,6 +530,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get trip by ID
   app.get("/api/trips/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const visibleTrips = await getVisibleTripsForUser(currentUser);
+      if (!visibleTrips.some((candidate) => candidate.id === req.params.id)) {
+        return res.status(403).json({ error: "You do not have access to this trip" });
+      }
       const trip = await storage.getTripWithDetails(req.params.id);
       if (!trip) {
         return res.status(404).json({ error: "Trip not found" });
@@ -522,6 +554,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
       }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      if (data.employeeId !== currentUser.id && currentUser.role !== "admin") {
+        return res.status(403).json({ error: "Можно создавать командировки только от своего имени" });
+      }
       if (data.memoType === "reschedule") {
         const sourceTrip = data.sourceTripId ? await storage.getTrip(data.sourceTripId) : undefined;
         if (data.tripType !== "unplanned" || !sourceTrip || sourceTrip.employeeId !== data.employeeId) {
@@ -648,6 +684,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Delete trip
   app.delete("/api/trips/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const trip = await storage.getTrip(req.params.id);
+      if (!trip) return res.status(404).json({ error: "Trip not found" });
+      if (trip.employeeId !== currentUser.id && currentUser.role !== "admin") {
+        return res.status(403).json({ error: "Можно удалить только собственную командировку" });
+      }
       const success = await storage.deleteTrip(req.params.id);
       if (!success) {
         return res.status(404).json({ error: "Trip not found" });
@@ -688,8 +731,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid status. Must be 'approved' or 'rejected'" });
       }
       
-      // Use current user as approver if approverId not provided
-      const approverId = bodyApproverId || req.session.userId;
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      // The current session is the only allowed source of the approver identity.
+      if (bodyApproverId && bodyApproverId !== req.session.userId) {
+        return res.status(403).json({ error: "Нельзя согласовывать командировку от имени другого пользователя" });
+      }
+      const approverId = req.session.userId;
       
       const trip = await storage.getTrip(tripId);
       if (!trip) {
@@ -1335,7 +1382,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = await storage.getAllUsers();
       }
 
-      res.json(users.sort((first, second) => first.fullName.localeCompare(second.fullName, "ru")));
+      res.json(users
+        .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"))
+        .map(withoutPassword));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch users" });
     }
@@ -1344,11 +1393,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get user by ID
   app.get("/api/users/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const visibleTrips = await getVisibleTripsForUser(currentUser);
+      const canViewUser = currentUser.id === req.params.id || allTripsViewerRoles.has(currentUser.role || "") ||
+        visibleTrips.some((trip) => trip.employeeId === req.params.id);
+      if (!canViewUser) return res.status(403).json({ error: "You do not have access to this user" });
       const user = await storage.getUser(req.params.id);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      res.json(user);
+      res.json(withoutPassword(user));
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch user" });
     }
@@ -1432,7 +1487,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create city
-  app.post("/api/cities", async (req, res) => {
+  app.post("/api/cities", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const data = insertCitySchema.parse(req.body);
       
@@ -1450,7 +1505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update city
-  app.patch("/api/cities/:id", async (req, res) => {
+  app.patch("/api/cities/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const data = insertCitySchema.partial().parse(req.body);
       const city = await storage.updateCity(req.params.id, data);
@@ -1464,7 +1519,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete city
-  app.delete("/api/cities/:id", async (req, res) => {
+  app.delete("/api/cities/:id", requireCoordinatorOrAdmin, async (req, res) => {
     try {
       const success = await storage.deleteCity(req.params.id);
       if (!success) {
@@ -1499,6 +1554,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get trip by ID
   app.get("/api/trips/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const visibleTrips = await getVisibleTripsForUser(currentUser);
+      if (!visibleTrips.some((candidate) => candidate.id === req.params.id)) {
+        return res.status(403).json({ error: "You do not have access to this trip" });
+      }
       const trip = await storage.getTripWithDetails(req.params.id);
       if (!trip) {
         return res.status(404).json({ error: "Trip not found" });
@@ -1517,6 +1578,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Trivio booking link must be an HTTPS link on trivio.ru" });
       }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      if (data.employeeId !== currentUser.id && currentUser.role !== "admin") {
+        return res.status(403).json({ error: "Можно создавать командировки только от своего имени" });
+      }
       if (data.memoType === "reschedule") {
         const sourceTrip = data.sourceTripId ? await storage.getTrip(data.sourceTripId) : undefined;
         if (data.tripType !== "unplanned" || !sourceTrip || sourceTrip.employeeId !== data.employeeId) {
@@ -1643,6 +1708,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Delete trip
   app.delete("/api/trips/:id", async (req, res) => {
     try {
+      const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
+      if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const trip = await storage.getTrip(req.params.id);
+      if (!trip) return res.status(404).json({ error: "Trip not found" });
+      if (trip.employeeId !== currentUser.id && currentUser.role !== "admin") {
+        return res.status(403).json({ error: "Можно удалить только собственную командировку" });
+      }
       const success = await storage.deleteTrip(req.params.id);
       if (!success) {
         return res.status(404).json({ error: "Trip not found" });
@@ -1683,8 +1755,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid status. Must be 'approved' or 'rejected'" });
       }
       
-      // Use current user as approver if approverId not provided
-      const approverId = bodyApproverId || req.session.userId;
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      if (bodyApproverId && bodyApproverId !== req.session.userId) {
+        return res.status(403).json({ error: "Нельзя согласовывать командировку от имени другого пользователя" });
+      }
+      const approverId = req.session.userId;
       
       const trip = await storage.getTrip(tripId);
       if (!trip) {
@@ -2138,7 +2213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Chat contacts: system administrator first, then colleagues and the direct manager.
+  // Chat contacts: system administrator and coordinator first, then colleagues and the direct manager.
   const getChatContacts = async (user: User) => {
     const users = await storage.getAllUsers();
 
@@ -2148,9 +2223,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
     }
 
-    const administratorContacts = users
-      .filter((candidate) => candidate.id !== user.id && candidate.role === "admin")
-      .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
+    const supportContacts = users
+      .filter((candidate) => candidate.id !== user.id && ["admin", "coordinator"].includes(candidate.role || ""))
+      .sort((first, second) => {
+        const roleOrder = (candidate: User) => candidate.role === "admin" ? 0 : 1;
+        return roleOrder(first) - roleOrder(second) || first.fullName.localeCompare(second.fullName, "ru");
+      });
     const contacts = new Map<string, User>();
     for (const candidate of users) {
       if (
@@ -2170,10 +2248,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const otherContacts = Array.from(contacts.values())
-      .filter((candidate) => candidate.role !== "admin")
+      .filter((candidate) => !["admin", "coordinator"].includes(candidate.role || ""))
       .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"));
 
-    return [...administratorContacts, ...otherContacts];
+    return [...supportContacts, ...otherContacts];
   };
 
   async function requireCoordinatorOrAdmin(req: any, res: any, next: any) {

@@ -34,7 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Plus, Trash2, Search, Lock } from "lucide-react";
-import { roleLabels, getRoleColor, isAdmin } from "@/lib/role-utils";
+import { roleLabels, getRoleColor } from "@/lib/role-utils";
 import { useAuth } from "@/contexts/auth-context";
 import type { User, InsertUser, UserRole } from "@shared/schema";
 
@@ -52,7 +52,7 @@ export default function Employees() {
   });
   const { toast } = useToast();
 
-  const isAdminOrDeputy = currentUser?.role === "admin" || currentUser?.role === "deputy_ceo";
+  const canManageEmployees = ["admin", "coordinator"].includes(currentUser?.role || "");
   
   const { data: employees = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/users"],
@@ -139,7 +139,7 @@ export default function Employees() {
             Управление списком сотрудников и руководителей
           </p>
         </div>
-        {currentUser && isAdmin(currentUser.role) ? (
+        {canManageEmployees ? (
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button data-testid="button-add-employee">
@@ -252,12 +252,12 @@ export default function Employees() {
         )}
       </div>
 
-      {!currentUser || !isAdmin(currentUser.role) && (
+      {!canManageEmployees && (
         <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-800">
           <CardContent className="pt-6 flex items-center gap-2">
             <Lock className="h-4 w-4 text-amber-700 dark:text-amber-300" />
             <p className="text-sm text-amber-800 dark:text-amber-200">
-              Добавление и удаление сотрудников доступно только администраторам
+              Добавление и удаление сотрудников доступно только администратору и координатору
             </p>
           </CardContent>
         </Card>
@@ -332,7 +332,7 @@ export default function Employees() {
                       </TableCell>
                       <TableCell className="text-sm">{getManagerName(employee.managerId, employee.managerName)}</TableCell>
                       <TableCell className="text-right">
-                        {currentUser && isAdmin(currentUser.role) ? (
+                        {canManageEmployees ? (
                           <Button
                             variant="ghost"
                             size="icon"

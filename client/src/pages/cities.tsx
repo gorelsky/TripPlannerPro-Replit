@@ -24,10 +24,13 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { MapPin, Plus, Pencil, Trash2, Search } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { MapPin, Plus, Pencil, Trash2, Search, Lock } from "lucide-react";
 import type { City, InsertCity } from "@shared/schema";
 
 export default function Cities() {
+  const { user } = useAuth();
+  const canManageDirectory = ["admin", "coordinator"].includes(user?.role || "");
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState<InsertCity>({ name: "", region: "" });
@@ -95,7 +98,7 @@ export default function Cities() {
             Управление справочником городов для командировок
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        {canManageDirectory && <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-city">
               <Plus className="h-4 w-4 mr-2" />
@@ -143,8 +146,19 @@ export default function Cities() {
               </DialogFooter>
             </form>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
+
+      {!canManageDirectory && (
+        <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
+          <CardContent className="flex items-center gap-2 pt-6">
+            <Lock className="h-4 w-4 text-amber-700 dark:text-amber-300" />
+            <p className="text-sm text-amber-800 dark:text-amber-200">
+              Добавление и удаление городов доступно только администратору и координатору
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -178,13 +192,13 @@ export default function Cities() {
                 <TableRow>
                   <TableHead>Название</TableHead>
                   <TableHead>Регион</TableHead>
-                  <TableHead className="text-right">Действия</TableHead>
+                  {canManageDirectory && <TableHead className="text-right">Действия</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredCities.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-32 text-center">
+                    <TableCell colSpan={canManageDirectory ? 3 : 2} className="h-32 text-center">
                       <div className="flex flex-col items-center justify-center text-muted-foreground">
                         <MapPin className="h-8 md:h-12 w-8 md:w-12 mb-2 md:mb-3 opacity-20" />
                         <p className="text-sm">
@@ -201,7 +215,7 @@ export default function Cities() {
                     <TableRow key={city.id} className="hover-elevate">
                       <TableCell className="font-medium">{city.name}</TableCell>
                       <TableCell className="text-muted-foreground">{city.region || "—"}</TableCell>
-                      <TableCell className="text-right">
+                      {canManageDirectory && <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -211,7 +225,7 @@ export default function Cities() {
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                      </TableCell>
+                      </TableCell>}
                     </TableRow>
                   ))
                 )}

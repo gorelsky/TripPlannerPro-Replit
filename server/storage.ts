@@ -31,7 +31,7 @@ import {
   contactMessages,
   chatMessages,
 } from "@shared/schema";
-import { randomUUID, createHash } from "crypto";
+import { randomUUID, createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { db } from "./db";
 import { eq, ne, sql } from "drizzle-orm";
 
@@ -130,7 +130,23 @@ export class PostgresStorage implements IStorage {
   }
 
   private hashPassword(password: string): string {
-    return createHash("sha256").update(password).digest("hex");
+    const salt = randomBytes(16).toString("hex");
+    const hash = scryptSync(password, salt, 64).toString("hex");
+    return `scrypt$${salt}$${hash}`;
+  }
+
+  private verifyPassword(password: string, storedPassword: string): boolean {
+    // Existing accounts used SHA-256. Keep them valid until their next password change.
+    if (/^[a-f0-9]{64}$/i.test(storedPassword)) {
+      const candidate = createHash("sha256").update(password).digest("hex");
+      return timingSafeEqual(Buffer.from(candidate, "hex"), Buffer.from(storedPassword, "hex"));
+    }
+
+    const [algorithm, salt, storedHash] = storedPassword.split("$");
+    if (algorithm !== "scrypt" || !salt || !storedHash) return false;
+    const candidate = scryptSync(password, salt, 64);
+    const expected = Buffer.from(storedHash, "hex");
+    return expected.length === candidate.length && timingSafeEqual(candidate, expected);
   }
 
   private sortUsersByFullName(records: User[]): User[] {
@@ -251,8 +267,8 @@ export class PostgresStorage implements IStorage {
   }
 
   private readonly VALID_ROLES = [
-    "admin", "coordinator", "accountant", "territorial_manager", "commercial_manager", "marketing_director",
-    "sales_director", "commerce_director", "product_manager", "kam", "ceo", "deputy_ceo"
+    "admin", "coordinator", "accountant", "medical_rep", "manager", "hr_director", "territorial_manager",
+    "commercial_manager", "marketing_director", "sales_director", "commerce_director", "product_manager", "kam", "ceo", "deputy_ceo"
   ];
 
   private resolveRole(providedRole: string | null | undefined, jobTitle: string | null | undefined): string | null {
@@ -432,8 +448,7 @@ export class PostgresStorage implements IStorage {
     const user = await this.getUserByEmail(email);
     if (!user) return undefined;
 
-    const hashedPassword = this.hashPassword(password);
-    if (user.password === hashedPassword) {
+    if (this.verifyPassword(password, user.password)) {
       return user;
     }
     return undefined;

@@ -175,7 +175,7 @@ export default function UserGuide() {
           <AccordionContent className="space-y-4 text-sm leading-6 text-muted-foreground">
             <div className="flex gap-2">
               <MessageCircle className="mt-1 h-4 w-4 shrink-0 text-primary" />
-              <p>В чате первым контактом указан Администратор, далее доступны коллеги отдела и непосредственный руководитель. Координатор может выбрать любого пользователя системы.</p>
+              <p>В чате первыми контактами указаны Администратор и Координатор, далее доступны коллеги отдела и непосредственный руководитель. Координатор может выбрать любого пользователя системы.</p>
             </div>
             <div className="flex gap-2">
               <UserRound className="mt-1 h-4 w-4 shrink-0 text-primary" />

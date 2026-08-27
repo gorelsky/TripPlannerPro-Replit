@@ -6,8 +6,6 @@ import express, {
   Response,
   NextFunction,
 } from "express";
-import fs from "node:fs";
-import path from "node:path";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 
@@ -26,12 +24,6 @@ export function log(message: string, source = "express") {
 }
 
 export const app = express();
-const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
-if (!fs.existsSync(attachmentsDir)) {
-  fs.mkdirSync(attachmentsDir, { recursive: true });
-}
-app.use("/uploads/contact-screenshots", express.static(attachmentsDir));
-
 declare module 'http' {
   interface IncomingMessage {
     rawBody: unknown
@@ -54,9 +46,13 @@ export const sessionStore = new PostgresSessionStore({
   tableName: "trip_planner_sessions",
   createTableIfMissing: true,
 });
+const sessionSecret = process.env.SESSION_SECRET || (process.env.NODE_ENV === "production" ? undefined : "dev-secret-key");
+if (!sessionSecret) {
+  throw new Error("SESSION_SECRET must be configured in production");
+}
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || "dev-secret-key",
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
@@ -80,6 +76,7 @@ declare module 'express-session' {
 // Middleware to support session via X-Session-ID header for iframe environments
 // where cookies may be blocked by third-party cookie policies (Replit preview)
 app.use((req: Request, res: Response, next: NextFunction) => {
+  if (process.env.NODE_ENV === "production") return next();
   const sessionId = req.headers['x-session-id'] as string;
   if (sessionId && !req.session.userId) {
     sessionStore.get(sessionId, (err, session) => {

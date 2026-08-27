@@ -9,52 +9,52 @@
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
-  --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
-  --border: 220 13% 91%;
-  --card: 0 0% 98%;
-  --card-foreground: 222 47% 11%;
-  --card-border: 220 13% 94%;
-  --sidebar: 220 14% 96%;
-  --sidebar-foreground: 222 47% 11%;
-  --sidebar-border: 220 13% 91%;
-  --sidebar-primary: 221 83% 53%;
-  --sidebar-primary-foreground: 210 40% 98%;
-  --sidebar-accent: 220 14% 91%;
-  --sidebar-accent-foreground: 222 47% 11%;
-  --sidebar-ring: 221 83% 53%;
-  --popover: 0 0% 96%;
-  --popover-foreground: 222 47% 11%;
-  --popover-border: 220 13% 92%;
-  --primary: 221 83% 53%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 220 14% 91%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 220 14% 93%;
-  --muted-foreground: 215 16% 47%;
-  --accent: 220 13% 91%;
-  --accent-foreground: 222 47% 11%;
-  --destructive: 0 84% 60%;
+  --background: 210 45% 98%;
+  --foreground: 222 47% 15%;
+  --border: 214 28% 89%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 15%;
+  --card-border: 214 28% 90%;
+  --sidebar: 224 66% 23%;
+  --sidebar-foreground: 214 40% 98%;
+  --sidebar-border: 224 55% 29%;
+  --sidebar-primary: 0 0% 100%;
+  --sidebar-primary-foreground: 224 66% 23%;
+  --sidebar-accent: 222 51% 33%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: 202 88% 68%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 15%;
+  --popover-border: 214 28% 89%;
+  --primary: 225 72% 39%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 211 50% 94%;
+  --secondary-foreground: 222 47% 22%;
+  --muted: 211 38% 95%;
+  --muted-foreground: 215 18% 42%;
+  --accent: 204 75% 92%;
+  --accent-foreground: 222 55% 27%;
+  --destructive: 0 72% 50%;
   --destructive-foreground: 0 0% 98%;
-  --input: 220 13% 85%;
-  --ring: 221 83% 53%;
-  --chart-1: 221 83% 53%;
-  --chart-2: 142 76% 36%;
-  --chart-3: 262 83% 58%;
-  --chart-4: 32 95% 44%;
-  --chart-5: 340 82% 52%;
-  --font-sans: Inter, system-ui, -apple-system, sans-serif;
+  --input: 214 24% 82%;
+  --ring: 225 72% 39%;
+  --chart-1: 225 72% 39%;
+  --chart-2: 167 63% 33%;
+  --chart-3: 35 89% 44%;
+  --chart-4: 347 74% 48%;
+  --chart-5: 270 54% 51%;
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: JetBrains Mono, Consolas, monospace;
   --radius: .5rem;
-  --shadow-2xs: 0px 2px 0px 0px hsl(221 83% 53% / 0.00);
-  --shadow-xs: 0px 2px 0px 0px hsl(221 83% 53% / 0.00);
-  --shadow-sm: 0px 2px 0px 0px hsl(221 83% 53% / 0.00), 0px 1px 2px -1px hsl(221 83% 53% / 0.00);
-  --shadow: 0px 2px 0px 0px hsl(221 83% 53% / 0.00), 0px 1px 2px -1px hsl(221 83% 53% / 0.00);
-  --shadow-md: 0px 2px 0px 0px hsl(221 83% 53% / 0.00), 0px 2px 4px -1px hsl(221 83% 53% / 0.00);
-  --shadow-lg: 0px 2px 0px 0px hsl(221 83% 53% / 0.00), 0px 4px 6px -1px hsl(221 83% 53% / 0.00);
-  --shadow-xl: 0px 2px 0px 0px hsl(221 83% 53% / 0.00), 0px 8px 10px -1px hsl(221 83% 53% / 0.00);
-  --shadow-2xl: 0px 2px 0px 0px hsl(221 83% 53% / 0.00);
+  --shadow-2xs: 0 1px 2px hsl(222 47% 15% / .03);
+  --shadow-xs: 0 1px 3px hsl(222 47% 15% / .05);
+  --shadow-sm: 0 2px 5px hsl(222 47% 15% / .06);
+  --shadow: 0 4px 10px hsl(222 47% 15% / .07);
+  --shadow-md: 0 8px 18px hsl(222 47% 15% / .08);
+  --shadow-lg: 0 14px 30px hsl(222 47% 15% / .10);
+  --shadow-xl: 0 20px 44px hsl(222 47% 15% / .12);
+  --shadow-2xl: 0 28px 64px hsl(222 47% 15% / .14);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -172,6 +172,11 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    font-feature-settings: "ss01", "cv02";
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / .18);
   }
 }
 

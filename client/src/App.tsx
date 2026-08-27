@@ -79,7 +79,7 @@ function AppContent() {
       <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-col flex-1 overflow-hidden">
-          <header className="flex items-center justify-between p-4 border-b bg-background">
+          <header className="flex items-center justify-between border-b bg-card px-4 py-3 shadow-xs">
             <div className="flex items-center gap-4">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
               <img src={slsLogo} alt="SLS Pharma" className="h-8 object-contain" />

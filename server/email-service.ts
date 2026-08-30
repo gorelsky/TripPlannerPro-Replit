@@ -69,7 +69,7 @@ function escapeHtml(value: string): string {
 }
 
 export function generateChatNotificationEmail(recipientName: string, senderName: string): string {
-  const appUrl = process.env.APP_URL || "http://localhost:5000";
+  const appUrl = process.env.APP_URL || "/";
   const chatUrl = `${appUrl.replace(/\/$/, "")}/chat`;
   return `
     <html>
@@ -91,7 +91,7 @@ export function generateChatNotificationEmail(recipientName: string, senderName:
 }
 
 export function generateCredentialEmail(fullName: string, email: string, password: string): string {
-  const appUrl = process.env.APP_URL || "http://localhost:5000";
+  const appUrl = process.env.APP_URL || "/";
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -124,7 +124,7 @@ export function generateCredentialEmail(fullName: string, email: string, passwor
 }
 
 export function generatePasswordResetEmail(fullName: string, email: string, password: string): string {
-  const appUrl = process.env.APP_URL || "http://localhost:5000";
+  const appUrl = process.env.APP_URL || "/";
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -153,14 +153,14 @@ export function generateContactAdminEmail(userName: string, userEmail: string, s
         <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
           <h2>Сообщение от пользователя</h2>
           
-          <p><strong>От:</strong> ${userName} (${userEmail})</p>
-          <p><strong>Тема:</strong> ${subject}</p>
+          <p><strong>От:</strong> ${escapeHtml(userName)} (${escapeHtml(userEmail)})</p>
+          <p><strong>Тема:</strong> ${escapeHtml(subject)}</p>
           
           <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
           
           <p><strong>Сообщение:</strong></p>
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word;">
-${message}
+${escapeHtml(message)}
           </div>
           
           <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">

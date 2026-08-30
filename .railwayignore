@@ -1,0 +1,12 @@
+.git/
+.local/
+.replit
+TripPlannerPro/
+node_modules/
+dist/
+screenshots/
+tmp_user_guide_render/
+uploads/
+*.docx
+*.csv
+.env

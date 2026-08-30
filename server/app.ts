@@ -36,8 +36,11 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false }));
 
-// Trust proxy for correct cookie handling behind Replit's reverse proxy
+// Railway terminates TLS at its proxy before forwarding requests to the app.
 app.set("trust proxy", true);
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
 
 // Session middleware
 const PostgresSessionStore = connectPgSimple(session);
@@ -47,8 +50,8 @@ export const sessionStore = new PostgresSessionStore({
   createTableIfMissing: true,
 });
 const sessionSecret = process.env.SESSION_SECRET || (process.env.NODE_ENV === "production" ? undefined : "dev-secret-key");
-if (!sessionSecret) {
-  throw new Error("SESSION_SECRET must be configured in production");
+if (!sessionSecret || (process.env.NODE_ENV === "production" && sessionSecret.length < 32)) {
+  throw new Error("SESSION_SECRET must be configured with at least 32 characters in production");
 }
 
 app.use(session({
@@ -59,7 +62,7 @@ app.use(session({
   name: "connect.sid",
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",
+    sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
     httpOnly: true,
     path: "/",
@@ -73,8 +76,7 @@ declare module 'express-session' {
   }
 }
 
-// Middleware to support session via X-Session-ID header for iframe environments
-// where cookies may be blocked by third-party cookie policies (Replit preview)
+// Supports the local preview environment without weakening production sessions.
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (process.env.NODE_ENV === "production") return next();
   const sessionId = req.headers['x-session-id'] as string;
@@ -99,36 +101,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  // Debug session info for export endpoint
-  if (path.includes("admin/trips-report")) {
-    console.log(`[SESSION-DEBUG] Path: ${path}`);
-    console.log(`[SESSION-DEBUG] Headers: ${JSON.stringify(req.headers)}`);
-    console.log(`[SESSION-DEBUG] Cookies: ${JSON.stringify(req.cookies)}`);
-    console.log(`[SESSION-DEBUG] session.id: ${req.sessionID}`);
-    console.log(`[SESSION-DEBUG] session.userId: ${req.session?.userId}`);
-  }
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "...";
-      }
-
-      log(logLine);
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     }
   });
 
@@ -142,29 +119,21 @@ export default async function runApp(
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
+    const message = status >= 500 ? "Internal Server Error" : (err.message || "Request failed");
+    if (status >= 500) console.error("[ERROR] Unhandled request error", err);
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly run the final setup after setting up all the other routes so
   // the catch-all route doesn't interfere with the other routes
   await setup(app, server);
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  const host = process.env.HOST ?? "0.0.0.0";
-  const isWindows = process.platform === "win32";
 
   server.listen(
     {
       port,
-      host,
-      ...(isWindows ? {} : { reusePort: true }),
+      host: "0.0.0.0",
     },
     () => {
       log(`serving on port ${port}`);

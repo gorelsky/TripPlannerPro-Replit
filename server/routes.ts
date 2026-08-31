@@ -113,12 +113,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const newPassword = generateRandomPassword(8);
         const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
-        const previousPasswordHash = user.password;
-
-        const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
-        if (!updatedUser) {
-          throw new Error("User was not found while updating password");
-        }
 
         const emailSent = await sendEmail({
           to: user.email,
@@ -127,8 +121,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         if (!emailSent) {
-          await storage.restoreUserPasswordHash(user.id, previousPasswordHash);
-          throw new Error("Email delivery was not accepted; the previous password was restored");
+          throw new Error("Email delivery was not accepted; the previous password was kept");
+        }
+
+        const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
+        if (!updatedUser) {
+          throw new Error("Email was sent, but the user was not found while updating the password");
         }
 
         credentialBroadcast.sent += 1;

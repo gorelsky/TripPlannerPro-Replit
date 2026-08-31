@@ -22,16 +22,23 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   }
 
   try {
-    const port = Number(process.env.SMTP_PORT || 587);
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port,
-      secure: process.env.SMTP_SECURE === "true" || port === 465,
-      auth: process.env.SMTP_USER
-        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
-        : undefined,
-    });
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const configuredPort = Number(process.env.SMTP_PORT || 587);
+    // Some hosting networks block port 465. Yandex also supports STARTTLS on 587.
+    const ports = configuredPort === 465 ? [465, 587] : [configuredPort];
+
+    for (const port of ports) {
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port,
+        secure: port === 465,
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 30_000,
+        auth: process.env.SMTP_USER
+          ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
+          : undefined,
+      });
+
       try {
         await transporter.sendMail({
           from: process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -42,14 +49,11 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
         console.log(`[EMAIL] Sent email to ${options.to}`);
         return true;
       } catch (error) {
-        if (attempt === 2) {
-          console.error(`[EMAIL] Failed to send email to ${options.to}`, error);
-          return false;
-        }
-        console.warn(`[EMAIL] First attempt failed for ${options.to}; retrying once.`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        console.warn(`[EMAIL] SMTP delivery failed on port ${port} for ${options.to}`, error);
       }
     }
+    console.error(`[EMAIL] Failed to send email to ${options.to} on all configured SMTP ports`);
+    return false;
   } catch (error) {
     console.error(`[EMAIL] Failed to prepare email for ${options.to}`, error);
     return false;

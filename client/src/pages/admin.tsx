@@ -65,6 +65,39 @@ export default function Admin() {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [isSendingCredentials, setIsSendingCredentials] = useState(false);
 
+  type CredentialBroadcastProgress = {
+    status: "idle" | "running" | "completed";
+    total: number;
+    sent: number;
+    failed: number;
+  };
+
+  const { data: credentialBroadcast, refetch: refetchCredentialBroadcast } = useQuery<CredentialBroadcastProgress>({
+    queryKey: ["/api/users/send-credentials/status"],
+  });
+
+  useEffect(() => {
+    if (!isSendingCredentials) return;
+
+    if (credentialBroadcast?.status === "completed") {
+      setIsSendingCredentials(false);
+      toast({
+        title: credentialBroadcast.failed > 0 ? "Рассылка завершена с ошибками" : "Рассылка завершена",
+        description: credentialBroadcast.failed > 0
+          ? `Отправлено: ${credentialBroadcast.sent}. Не отправлено: ${credentialBroadcast.failed}; для них прежние пароли сохранены.`
+          : `Отправлено писем: ${credentialBroadcast.sent}.`,
+        variant: credentialBroadcast.failed > 0 ? "destructive" : "default",
+      });
+      return;
+    }
+
+    const pollId = window.setTimeout(() => {
+      void refetchCredentialBroadcast();
+    }, 1500);
+
+    return () => window.clearTimeout(pollId);
+  }, [credentialBroadcast, isSendingCredentials, refetchCredentialBroadcast, toast]);
+
   // ============ USERS ============
   const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
     queryKey: ["/api/users"],
@@ -1897,18 +1930,14 @@ export default function Admin() {
                 <Button
                   onClick={() => {
                     if (window.confirm("Вы уверены? Всем пользователям будут отправлены объявление о тестовом периоде и новые временные пароли.")) {
-                      setIsSendingCredentials(true);
                       apiRequest("POST", "/api/users/send-credentials", {})
                         .then(async (response) => {
-                          const result = await response.json() as { results?: { sent: number; failed: number } };
-                          const sent = result.results?.sent ?? 0;
-                          const failed = result.results?.failed ?? 0;
+                          const result = await response.json() as { progress: CredentialBroadcastProgress };
+                          queryClient.setQueryData(["/api/users/send-credentials/status"], result.progress);
+                          setIsSendingCredentials(true);
                           toast({
-                            title: failed > 0 ? "Рассылка завершена с ошибками" : "Рассылка завершена",
-                            description: failed > 0
-                              ? `Отправлено: ${sent}. Не отправлено: ${failed}; для них прежние пароли сохранены.`
-                              : `Отправлено писем: ${sent}.`,
-                            variant: failed > 0 ? "destructive" : "default",
+                            title: "Рассылка запущена",
+                            description: `Писем в очереди: ${result.progress.total}. Интервал между письмами - 5 секунд.`,
                           });
                         })
                         .catch((err) => {
@@ -1927,6 +1956,11 @@ export default function Admin() {
                   <FileUp className="h-4 w-4 mr-2" />
                   {isSendingCredentials ? "Выполняется рассылка..." : "Отправить письмо о запуске всем"}
                 </Button>
+                {isSendingCredentials && credentialBroadcast?.status === "running" && (
+                  <p className="text-sm text-muted-foreground text-center" aria-live="polite">
+                    Отправлено: {credentialBroadcast.sent + credentialBroadcast.failed} из {credentialBroadcast.total}. Успешно: {credentialBroadcast.sent}. Ошибок: {credentialBroadcast.failed}.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>

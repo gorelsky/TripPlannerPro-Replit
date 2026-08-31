@@ -22,6 +22,69 @@ import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
+  type CredentialBroadcastStatus = "idle" | "running" | "completed";
+  type CredentialBroadcastProgress = {
+    status: CredentialBroadcastStatus;
+    total: number;
+    sent: number;
+    failed: number;
+    startedAt?: string;
+    completedAt?: string;
+  };
+
+  let credentialBroadcast: CredentialBroadcastProgress = {
+    status: "idle",
+    total: 0,
+    sent: 0,
+    failed: 0,
+  };
+
+  const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  async function runCredentialBroadcast(users: User[]) {
+    for (let index = 0; index < users.length; index += 1) {
+      const user = users[index];
+      try {
+        const newPassword = generateRandomPassword(8);
+        const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
+        const previousPasswordHash = user.password;
+
+        const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
+        if (!updatedUser) {
+          throw new Error("User was not found while updating password");
+        }
+
+        const emailSent = await sendEmail({
+          to: user.email,
+          subject: "Тестовый период приложения для командировок: доступ к системе",
+          html: emailContent,
+        });
+
+        if (!emailSent) {
+          await storage.restoreUserPasswordHash(user.id, previousPasswordHash);
+          throw new Error("Email delivery was not accepted; the previous password was restored");
+        }
+
+        credentialBroadcast.sent += 1;
+        console.log(`[CREDENTIALS] Sent to ${user.email}`);
+      } catch (error) {
+        credentialBroadcast.failed += 1;
+        console.error(`[CREDENTIALS] Failed to send to ${user.email}:`, error);
+      }
+
+      // Keep the provider-friendly pace requested for this campaign.
+      if (index < users.length - 1) {
+        await wait(5000);
+      }
+    }
+
+    credentialBroadcast = {
+      ...credentialBroadcast,
+      status: "completed",
+      completedAt: new Date().toISOString(),
+    };
+  }
+
   if (!fs.existsSync(attachmentsDir)) {
     fs.mkdirSync(attachmentsDir, { recursive: true });
   }
@@ -2762,9 +2825,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Send credentials to all users (admin only)
+  app.get("/api/users/send-credentials/status", requireAdmin, (_req, res) => {
+    res.json(credentialBroadcast);
+  });
+
+  // Send credentials to all users (admin only). The work continues after the
+  // response so a long, rate-limited campaign cannot outlive its HTTP request.
   app.post("/api/users/send-credentials", requireAdmin, async (req, res) => {
     try {
+      if (credentialBroadcast.status === "running") {
+        return res.status(409).json({ error: "Рассылка уже выполняется" });
+      }
+
       const allUsers = await storage.getAllUsers();
       const nonAdminUsers = allUsers.filter(u => u.role !== "admin");
 
@@ -2772,47 +2844,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No users to send credentials to" });
       }
 
-      const results = {
+      credentialBroadcast = {
+        status: "running",
+        total: nonAdminUsers.length,
         sent: 0,
         failed: 0,
-        errors: [] as string[],
+        startedAt: new Date().toISOString(),
       };
 
-      for (const user of nonAdminUsers) {
-        try {
-          const newPassword = generateRandomPassword(8);
-          const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
-          const previousPasswordHash = user.password;
+      void runCredentialBroadcast(nonAdminUsers);
 
-          const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
-          if (!updatedUser) {
-            throw new Error("User was not found while updating the password");
-          }
-
-          const emailSent = await sendEmail({
-            to: user.email,
-            subject: "Тестовый период приложения для командировок: доступ к системе",
-            html: emailContent,
-          });
-
-          if (!emailSent) {
-            await storage.restoreUserPasswordHash(user.id, previousPasswordHash);
-            throw new Error("Email delivery was not accepted; the previous password was restored");
-          }
-
-          results.sent++;
-          console.log(`[CREDENTIALS] Sent to ${user.email}`);
-        } catch (error: any) {
-          results.failed++;
-          results.errors.push(`${user.email}: ${error.message}`);
-          console.error(`[CREDENTIALS] Failed to send to ${user.email}:`, error);
-        }
-      }
-
-      res.json({
+      res.status(202).json({
         success: true,
-        message: `Credentials sent to ${results.sent} users${results.failed > 0 ? `, ${results.failed} failed` : ""}`,
-        results,
+        message: "Рассылка запущена",
+        progress: credentialBroadcast,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send credentials" });

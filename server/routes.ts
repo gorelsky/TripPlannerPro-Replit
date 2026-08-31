@@ -42,6 +42,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   let credentialBroadcastId: string | null = null;
   let credentialBroadcastTableReady: Promise<void> | null = null;
+  let loginSessionTableReady: Promise<void> | null = null;
+
+  function ensureLoginSessionTable(): Promise<void> {
+    if (!loginSessionTableReady) {
+      loginSessionTableReady = db.execute(sql`
+        CREATE TABLE IF NOT EXISTS trip_planner_login_sessions (
+          id varchar PRIMARY KEY,
+          user_id varchar NOT NULL,
+          full_name text NOT NULL,
+          email text NOT NULL,
+          session_id varchar NOT NULL,
+          login_at timestamptz NOT NULL DEFAULT now(),
+          logout_at timestamptz,
+          duration_seconds integer,
+          end_reason text
+        )
+      `).then(() => undefined);
+    }
+    return loginSessionTableReady;
+  }
+
+  async function startLoginSession(req: any, user: User) {
+    try {
+      await ensureLoginSessionTable();
+      const loginSessionId = randomUUID();
+      await db.execute(sql`
+        INSERT INTO trip_planner_login_sessions (id, user_id, full_name, email, session_id)
+        VALUES (${loginSessionId}, ${user.id}, ${user.fullName}, ${user.email}, ${req.sessionID})
+      `);
+      req.session.loginSessionId = loginSessionId;
+    } catch (error) {
+      // Audit logging must not block a legitimate user login.
+      console.error("[SESSION-AUDIT] Failed to record login:", error);
+    }
+  }
+
+  async function finishLoginSession(req: any, endReason: string) {
+    const loginSessionId = req.session?.loginSessionId;
+    if (!loginSessionId) return;
+    try {
+      await ensureLoginSessionTable();
+      await db.execute(sql`
+        UPDATE trip_planner_login_sessions
+        SET logout_at = now(),
+            duration_seconds = GREATEST(0, EXTRACT(EPOCH FROM now() - login_at)::integer),
+            end_reason = ${endReason}
+        WHERE id = ${loginSessionId} AND logout_at IS NULL
+      `);
+    } catch (error) {
+      console.error("[SESSION-AUDIT] Failed to record logout:", error);
+    }
+  }
 
   function ensureCredentialBroadcastTable(): Promise<void> {
     if (!credentialBroadcastTableReady) {
@@ -291,6 +343,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       req.session.userId = user.id;
+      await startLoginSession(req, user);
       console.log(`[AUTH] Session userId set to: ${user.id}, sessionID: ${req.sessionID}`);
       console.log(`[AUTH] Setting cookie with path: ${req.session.cookie.path}, secure: ${req.session.cookie.secure}, httpOnly: ${req.session.cookie.httpOnly}`);
       const { password: _, ...userWithoutPassword } = user;
@@ -314,6 +367,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Logout
   app.post("/api/auth/logout", async (req, res) => {
+    await finishLoginSession(req, "logout");
     req.session.destroy((err) => {
       if (err) {
         return res.status(500).json({ error: "Logout failed" });
@@ -373,8 +427,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Coordinator can switch only to employee test accounts" });
       }
 
+      await finishLoginSession(req, "switched_user");
+
       // Switch session to target user
       req.session.userId = userId;
+      await startLoginSession(req, targetUser);
       const { password: _, ...userWithoutPassword } = targetUser;
       console.log(`[AUTH] Admin switched to user: ${targetUser.email}`);
       

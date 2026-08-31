@@ -66,7 +66,7 @@ export default function Admin() {
   const [isSendingCredentials, setIsSendingCredentials] = useState(false);
 
   type CredentialBroadcastProgress = {
-    status: "idle" | "running" | "completed";
+    status: "idle" | "running" | "completed" | "interrupted";
     total: number;
     sent: number;
     failed: number;
@@ -1966,6 +1966,11 @@ export default function Admin() {
                 {credentialBroadcast?.status === "completed" && (
                   <p className="text-sm text-center" aria-live="polite">
                     Последняя рассылка завершена: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}.
+                  </p>
+                )}
+                {credentialBroadcast?.status === "interrupted" && (
+                  <p className="text-sm text-destructive text-center" aria-live="polite">
+                    Последняя рассылка была прервана перезапуском сервера: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}. Не запускайте её повторно, пока не уточним получателей.
                   </p>
                 )}
               </div>

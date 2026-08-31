@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "crypto";
+import { sql } from "drizzle-orm";
+import { db } from "./db";
 import { storage } from "./storage";
 import { 
   insertUserSchema, 
@@ -22,7 +24,7 @@ import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
-  type CredentialBroadcastStatus = "idle" | "running" | "completed";
+  type CredentialBroadcastStatus = "idle" | "running" | "completed" | "interrupted";
   type CredentialBroadcastProgress = {
     status: CredentialBroadcastStatus;
     total: number;
@@ -38,6 +40,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     sent: 0,
     failed: 0,
   };
+  let credentialBroadcastId: string | null = null;
+  let credentialBroadcastTableReady: Promise<void> | null = null;
+
+  function ensureCredentialBroadcastTable(): Promise<void> {
+    if (!credentialBroadcastTableReady) {
+      credentialBroadcastTableReady = db.execute(sql`
+        CREATE TABLE IF NOT EXISTS trip_planner_credential_broadcasts (
+          id varchar PRIMARY KEY,
+          status text NOT NULL,
+          total integer NOT NULL,
+          sent integer NOT NULL DEFAULT 0,
+          failed integer NOT NULL DEFAULT 0,
+          started_at timestamptz NOT NULL DEFAULT now(),
+          completed_at timestamptz
+        )
+      `).then(() => undefined);
+    }
+    return credentialBroadcastTableReady;
+  }
+
+  async function saveCredentialBroadcastProgress() {
+    if (!credentialBroadcastId) return;
+    try {
+      await db.execute(sql`
+        UPDATE trip_planner_credential_broadcasts
+        SET status = ${credentialBroadcast.status},
+            sent = ${credentialBroadcast.sent},
+            failed = ${credentialBroadcast.failed},
+            completed_at = ${credentialBroadcast.completedAt || null}
+        WHERE id = ${credentialBroadcastId}
+      `);
+    } catch (error) {
+      // Do not stop already accepted email delivery because the audit write failed.
+      console.error("[CREDENTIALS] Failed to save broadcast progress:", error);
+    }
+  }
+
+  async function getLastCredentialBroadcast(): Promise<CredentialBroadcastProgress> {
+    await ensureCredentialBroadcastTable();
+    const result = await db.execute(sql`
+      SELECT status, total, sent, failed, started_at, completed_at
+      FROM trip_planner_credential_broadcasts
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    const row = result.rows[0] as {
+      status: CredentialBroadcastStatus;
+      total: number;
+      sent: number;
+      failed: number;
+      started_at: Date | string;
+      completed_at: Date | string | null;
+    } | undefined;
+
+    if (!row) return credentialBroadcast;
+    return {
+      status: row.status,
+      total: Number(row.total),
+      sent: Number(row.sent),
+      failed: Number(row.failed),
+      startedAt: new Date(row.started_at).toISOString(),
+      completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : undefined,
+    };
+  }
 
   const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -66,9 +132,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         credentialBroadcast.sent += 1;
+        await saveCredentialBroadcastProgress();
         console.log(`[CREDENTIALS] Sent to ${user.email}`);
       } catch (error) {
         credentialBroadcast.failed += 1;
+        await saveCredentialBroadcastProgress();
         console.error(`[CREDENTIALS] Failed to send to ${user.email}:`, error);
       }
 
@@ -83,6 +151,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       status: "completed",
       completedAt: new Date().toISOString(),
     };
+    await saveCredentialBroadcastProgress();
   }
 
   if (!fs.existsSync(attachmentsDir)) {
@@ -2825,8 +2894,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/send-credentials/status", requireAdmin, (_req, res) => {
-    res.json(credentialBroadcast);
+  app.get("/api/users/send-credentials/status", requireAdmin, async (_req, res) => {
+    try {
+      if (credentialBroadcast.status === "running") {
+        return res.json(credentialBroadcast);
+      }
+
+      const lastBroadcast = await getLastCredentialBroadcast();
+      if (lastBroadcast.status === "running") {
+        // A previous server instance was restarted before it finished the queue.
+        await db.execute(sql`
+          UPDATE trip_planner_credential_broadcasts
+          SET status = 'interrupted', completed_at = now()
+          WHERE status = 'running'
+        `);
+        return res.json({
+          ...lastBroadcast,
+          status: "interrupted" as const,
+          completedAt: new Date().toISOString(),
+        });
+      }
+
+      return res.json(lastBroadcast);
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message || "Failed to read credential broadcast status" });
+    }
   });
 
   // Send credentials to all users (admin only). The work continues after the
@@ -2844,6 +2936,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No users to send credentials to" });
       }
 
+      await ensureCredentialBroadcastTable();
+      credentialBroadcastId = randomUUID();
       credentialBroadcast = {
         status: "running",
         total: nonAdminUsers.length,
@@ -2851,6 +2945,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         failed: 0,
         startedAt: new Date().toISOString(),
       };
+      await db.execute(sql`
+        INSERT INTO trip_planner_credential_broadcasts (id, status, total, sent, failed, started_at)
+        VALUES (
+          ${credentialBroadcastId},
+          ${credentialBroadcast.status},
+          ${credentialBroadcast.total},
+          ${credentialBroadcast.sent},
+          ${credentialBroadcast.failed},
+          ${credentialBroadcast.startedAt}
+        )
+      `);
 
       void runCredentialBroadcast(nonAdminUsers);
 

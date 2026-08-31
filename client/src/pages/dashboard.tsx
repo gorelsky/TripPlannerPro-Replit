@@ -112,11 +112,9 @@ export default function Dashboard() {
 
   // Функция расчета суточных
   const calculateAllowance = (startDate: string, endDate: string) => {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const nights = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    const amountPerNight = 1700; // 1700 рублей за ночь
-    return nights * amountPerNight;
+    const days = getTripDuration(startDate, endDate);
+    const amountPerDay = 1700;
+    return days * amountPerDay;
   };
 
   // Получаем отфильтрованные командировки для модального окна

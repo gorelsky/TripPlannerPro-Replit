@@ -158,11 +158,11 @@ export default function Trips() {
 
   const calculateDailyAllowance = (start: Date | string | undefined, end: Date | string | undefined): number => {
     if (!start || !end) return 0;
-    const s = new Date(start);
-    const e = new Date(end);
-    const nights = Math.max(0, Math.ceil((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)));
+    const s = typeof start === "string" ? start : start.toISOString().slice(0, 10);
+    const e = typeof end === "string" ? end : end.toISOString().slice(0, 10);
+    const days = getTripDuration(s, e);
     const perNight = parseInt(allowance?.amountPerNight || "1700");
-    return nights * perNight;
+    return days * perNight;
   };
 
   const createMutation = useMutation({

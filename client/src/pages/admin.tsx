@@ -1800,7 +1800,7 @@ export default function Admin() {
             <CardContent className="space-y-4">
               <div className="flex items-end gap-4 max-w-sm">
                 <div className="grid gap-2 flex-1">
-                  <Label htmlFor="allowance-amount">Сумма за ночь (руб.)</Label>
+                  <Label htmlFor="allowance-amount">Сумма за сутки (руб.)</Label>
                   <Input
                     id="allowance-amount"
                     type="number"

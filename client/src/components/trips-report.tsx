@@ -140,7 +140,7 @@ export function TripsReport() {
                   Командировки с суточными ({report.withAllowance.length})
                 </CardTitle>
                 <CardDescription>
-                  Суточные: {report.amountPerNight} руб/ночь
+                  Суточные: {report.amountPerNight} руб/сутки
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -154,7 +154,7 @@ export function TripsReport() {
                         <TableHead>Срок</TableHead>
                         <TableHead>Маршрут</TableHead>
                         <TableHead>Транспорт</TableHead>
-                        <TableHead className="text-right">Ночей</TableHead>
+                        <TableHead className="text-right">Суток</TableHead>
                         <TableHead className="text-right">Итог, руб.</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -180,7 +180,7 @@ export function TripsReport() {
                             <TableCell className="text-sm">{tripDates}</TableCell>
                             <TableCell className="text-sm">{routePath}</TableCell>
                             <TableCell className="text-sm">{transportMap[trip.transportType] || trip.transportType}</TableCell>
-                            <TableCell className="text-right">{trip.nights}</TableCell>
+                            <TableCell className="text-right">{trip.days}</TableCell>
                             <TableCell className="text-right font-semibold">{trip.totalAllowance.toLocaleString("ru-RU")}</TableCell>
                           </TableRow>
                         );
@@ -204,7 +204,7 @@ export function TripsReport() {
                   Командировки без суточных ({report.withoutAllowance.length})
                 </CardTitle>
                 <CardDescription>
-                  Командировки на один день (без ночевок)
+                  Командировки без суточных
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -218,7 +218,7 @@ export function TripsReport() {
                         <TableHead>Срок</TableHead>
                         <TableHead>Маршрут</TableHead>
                         <TableHead>Транспорт</TableHead>
-                        <TableHead className="text-right">Ночей</TableHead>
+                        <TableHead className="text-right">Суток</TableHead>
                         <TableHead className="text-right">Итог, руб.</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -244,7 +244,7 @@ export function TripsReport() {
                             <TableCell className="text-sm">{tripDates}</TableCell>
                             <TableCell className="text-sm">{routePath}</TableCell>
                             <TableCell className="text-sm">{transportMap[trip.transportType] || trip.transportType}</TableCell>
-                            <TableCell className="text-right">{trip.nights}</TableCell>
+                            <TableCell className="text-right">{trip.days}</TableCell>
                             <TableCell className="text-right font-semibold">0</TableCell>
                           </TableRow>
                         );

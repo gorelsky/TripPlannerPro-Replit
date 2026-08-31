@@ -70,6 +70,8 @@ export default function Admin() {
     total: number;
     sent: number;
     failed: number;
+    startedAt?: string;
+    completedAt?: string;
   };
 
   const { data: credentialBroadcast, refetch: refetchCredentialBroadcast } = useQuery<CredentialBroadcastProgress>({
@@ -1941,24 +1943,29 @@ export default function Admin() {
                           });
                         })
                         .catch((err) => {
+                          setIsSendingCredentials(false);
                           toast({
                             title: "Ошибка",
                             description: err.response?.data?.error || "Не удалось отправить письма",
                             variant: "destructive",
                           });
-                        })
-                        .finally(() => setIsSendingCredentials(false));
+                        });
                     }
                   }}
                   className="w-full"
-                  disabled={isSendingCredentials}
+                  disabled={isSendingCredentials || credentialBroadcast?.status === "running"}
                 >
                   <FileUp className="h-4 w-4 mr-2" />
-                  {isSendingCredentials ? "Выполняется рассылка..." : "Отправить письмо о запуске всем"}
+                  {credentialBroadcast?.status === "running" ? "Выполняется рассылка..." : "Отправить письмо о запуске всем"}
                 </Button>
-                {isSendingCredentials && credentialBroadcast?.status === "running" && (
+                {credentialBroadcast?.status === "running" && (
                   <p className="text-sm text-muted-foreground text-center" aria-live="polite">
-                    Отправлено: {credentialBroadcast.sent + credentialBroadcast.failed} из {credentialBroadcast.total}. Успешно: {credentialBroadcast.sent}. Ошибок: {credentialBroadcast.failed}.
+                    Рассылка выполняется: {credentialBroadcast.sent + credentialBroadcast.failed} из {credentialBroadcast.total}. Успешно: {credentialBroadcast.sent}. Ошибок: {credentialBroadcast.failed}.
+                  </p>
+                )}
+                {credentialBroadcast?.status === "completed" && (
+                  <p className="text-sm text-center" aria-live="polite">
+                    Последняя рассылка завершена: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}.
                   </p>
                 )}
               </div>

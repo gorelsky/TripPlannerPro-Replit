@@ -154,7 +154,7 @@ export function TripsReport() {
                         <TableHead>Срок</TableHead>
                         <TableHead>Маршрут</TableHead>
                         <TableHead>Транспорт</TableHead>
-                        <TableHead className="text-right">Суток</TableHead>
+                        <TableHead className="text-right">Суточных дней</TableHead>
                         <TableHead className="text-right">Итог, руб.</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -180,7 +180,7 @@ export function TripsReport() {
                             <TableCell className="text-sm">{tripDates}</TableCell>
                             <TableCell className="text-sm">{routePath}</TableCell>
                             <TableCell className="text-sm">{transportMap[trip.transportType] || trip.transportType}</TableCell>
-                            <TableCell className="text-right">{trip.days}</TableCell>
+                            <TableCell className="text-right">{trip.allowanceDays}</TableCell>
                             <TableCell className="text-right font-semibold">{trip.totalAllowance.toLocaleString("ru-RU")}</TableCell>
                           </TableRow>
                         );
@@ -218,7 +218,7 @@ export function TripsReport() {
                         <TableHead>Срок</TableHead>
                         <TableHead>Маршрут</TableHead>
                         <TableHead>Транспорт</TableHead>
-                        <TableHead className="text-right">Суток</TableHead>
+                        <TableHead className="text-right">Суточных дней</TableHead>
                         <TableHead className="text-right">Итог, руб.</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -244,7 +244,7 @@ export function TripsReport() {
                             <TableCell className="text-sm">{tripDates}</TableCell>
                             <TableCell className="text-sm">{routePath}</TableCell>
                             <TableCell className="text-sm">{transportMap[trip.transportType] || trip.transportType}</TableCell>
-                            <TableCell className="text-right">{trip.days}</TableCell>
+                            <TableCell className="text-right">{trip.allowanceDays}</TableCell>
                             <TableCell className="text-right font-semibold">0</TableCell>
                           </TableRow>
                         );

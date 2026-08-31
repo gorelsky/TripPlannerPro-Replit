@@ -111,8 +111,9 @@ export default function Dashboard() {
   const recentTrips = filteredTrips.slice(0, 5);
 
   // Функция расчета суточных
-  const calculateAllowance = (startDate: string, endDate: string) => {
+  const calculateAllowance = (startDate: string, endDate: string, transportType: TransportType) => {
     const days = getTripDuration(startDate, endDate);
+    if (days === 1 && transportType === "car") return 0;
     const amountPerDay = 1700;
     return days * amountPerDay;
   };
@@ -420,7 +421,7 @@ export default function Dashboard() {
                 <div className="space-y-3">
                   {displayTrips.map((trip) => {
                     const nights = getTripDuration(trip.startDate, trip.endDate);
-                    const allowance = calculateAllowance(trip.startDate, trip.endDate);
+                    const allowance = calculateAllowance(trip.startDate, trip.endDate, trip.transportType);
                     
                     return (
                       <div

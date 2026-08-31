@@ -1146,11 +1146,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const startDate = new Date(`${trip.startDate}T00:00:00`);
           const endDate = new Date(`${trip.endDate}T00:00:00`);
           const days = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1);
-          const totalAllowance = days * amountPerNight;
+          const allowanceDays = days === 1 && trip.transportType === "car" ? 0 : days;
+          const totalAllowance = allowanceDays * amountPerNight;
           
           return {
             ...details,
             days,
+            allowanceDays,
             totalAllowance,
           };
         })
@@ -1225,7 +1227,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Срок командировки",
         "Город проживания - Город командировки - Город проживания",
         "Транспорт",
-        "Суток",
+        "Суточных дней",
         "Итог суточные, руб.",
       ];
       
@@ -1252,7 +1254,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tripDates,
             routePath,
             transportMap[trip.transportType] || trip.transportType,
-            trip.days,
+            trip.allowanceDays,
             trip.totalAllowance,
           ]);
         });
@@ -1285,7 +1287,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tripDates,
             routePath,
             transportMap[trip.transportType] || trip.transportType,
-            trip.days,
+            trip.allowanceDays,
             trip.totalAllowance || 0,
           ]);
         });
@@ -2172,7 +2174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Срок командировки",
         "Город проживания - Город командировки - Город проживания",
         "Транспорт",
-        "Суток",
+        "Суточных дней",
         "Итог суточные, руб.",
       ];
       
@@ -2199,7 +2201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tripDates,
             routePath,
             transportMap[trip.transportType] || trip.transportType,
-            trip.days,
+            trip.allowanceDays,
             trip.totalAllowance,
           ]);
         });
@@ -2232,7 +2234,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tripDates,
             routePath,
             transportMap[trip.transportType] || trip.transportType,
-            trip.days,
+            trip.allowanceDays,
             trip.totalAllowance || 0,
           ]);
         });
@@ -2508,6 +2510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allowancePerNight = Number(String(allowance?.amountPerNight || "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
       const dateAtMidnight = (value: string) => new Date(`${value}T00:00:00`);
       const tripDays = (trip: Trip) => Math.max(1, Math.round((dateAtMidnight(trip.endDate).getTime() - dateAtMidnight(trip.startDate).getTime()) / 86400000) + 1);
+      const allowanceDays = (trip: Trip) => tripDays(trip) === 1 && trip.transportType === "car" ? 0 : tripDays(trip);
       const tripKilometers = (trip: Trip) => Number(String(routesById.get(trip.routeId)?.kilometers || "0").replace(/[^0-9.,-]/g, "").replace(",", ".")) || 0;
       const increment = <T extends Record<string, number>>(collection: Map<string, T>, key: string, defaults: T) => {
         const row = collection.get(key) || { ...defaults };
@@ -2527,7 +2530,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const employee = usersById.get(trip.employeeId);
         const department = employee?.department || "Без отдела";
         const days = tripDays(trip);
-        const estimatedCost = days * allowancePerNight;
+        const estimatedCost = allowanceDays(trip) * allowancePerNight;
         const kilometers = tripKilometers(trip);
         const departmentRow = increment(departmentStats, department, { trips: 0, approved: 0, pending: 0, days: 0, estimatedCost: 0, kilometers: 0 });
         departmentRow.trips += 1;
@@ -2593,7 +2596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const mapToSorted = <T extends { trips?: number; sent?: number }>(entries: Array<[string, T]>, key: keyof T) => entries.sort((a, b) => Number(b[1][key] || 0) - Number(a[1][key] || 0));
       const totalDays = tripsInPeriod.reduce((total, trip) => total + tripDays(trip), 0);
-      const totalEstimatedCost = tripsInPeriod.reduce((total, trip) => total + tripDays(trip) * allowancePerNight, 0);
+      const totalEstimatedCost = tripsInPeriod.reduce((total, trip) => total + allowanceDays(trip) * allowancePerNight, 0);
       const totalKilometers = tripsInPeriod.reduce((total, trip) => total + tripKilometers(trip), 0);
 
       res.json({

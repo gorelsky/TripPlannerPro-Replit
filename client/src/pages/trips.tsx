@@ -156,11 +156,12 @@ export default function Trips() {
       )
     : routes;
 
-  const calculateDailyAllowance = (start: Date | string | undefined, end: Date | string | undefined): number => {
+  const calculateDailyAllowance = (start: Date | string | undefined, end: Date | string | undefined, transportType: TransportType): number => {
     if (!start || !end) return 0;
     const s = typeof start === "string" ? start : start.toISOString().slice(0, 10);
     const e = typeof end === "string" ? end : end.toISOString().slice(0, 10);
     const days = getTripDuration(s, e);
+    if (days === 1 && transportType === "car") return 0;
     const perNight = parseInt(allowance?.amountPerNight || "1700");
     return days * perNight;
   };
@@ -673,7 +674,7 @@ export default function Trips() {
                     <span className="text-sm font-medium">Предварительный расчет суточных:</span>
                   </div>
                   <span className="text-lg font-bold text-primary">
-                    {calculateDailyAllowance(startDate, endDate).toLocaleString("ru-RU")} ₽
+                    {calculateDailyAllowance(startDate, endDate, formData.transportType).toLocaleString("ru-RU")} ₽
                   </span>
                 </div>
               )}
@@ -874,7 +875,7 @@ export default function Trips() {
                         <TableCell className="text-xs md:text-sm font-medium hidden xl:table-cell">
                           <div className="flex items-center gap-1">
                             <Wallet className="h-3 w-3 text-muted-foreground" />
-                            {calculateDailyAllowance(trip.startDate, trip.endDate).toLocaleString("ru-RU")} ₽
+                            {calculateDailyAllowance(trip.startDate, trip.endDate, trip.transportType).toLocaleString("ru-RU")} ₽
                           </div>
                         </TableCell>
                         <TableCell className="text-xs md:text-sm hidden 2xl:table-cell max-w-xs">

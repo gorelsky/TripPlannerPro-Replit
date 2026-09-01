@@ -281,10 +281,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
 
-  async function getRequiredWorkflowReviewer(role: "coordinator" | "deputy_ceo") {
+  async function getRequiredWorkflowReviewer(role: "coordinator" | "deputy_ceo" | "ceo") {
     const reviewers = (await storage.getAllUsers()).filter((user) => user.role === role);
     if (reviewers.length !== 1) {
-      const label = role === "coordinator" ? "координатора" : "заместителя ГД";
+      const label = role === "coordinator"
+        ? "координатора"
+        : role === "deputy_ceo"
+          ? "заместителя ГД"
+          : "генерального директора";
       throw new Error(`Для маршрута согласования должен быть назначен один ${label}`);
     }
     return reviewers[0];
@@ -329,16 +333,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return today.day <= 25 && trip.startDate.startsWith(expectedMonth);
   }
 
-  function assertTripPlanningWindow(trip: Pick<Trip, "tripType" | "startDate" | "endDate">) {
+  async function assertTripPlanningWindow(
+    trip: Pick<Trip, "tripType" | "startDate" | "endDate"> & { id?: string },
+  ) {
     if (!isNextMonthPlanWindow(trip)) {
       throw new Error("Плановую командировку можно отправить до 25-го числа текущего месяца и только на следующий месяц. Для другой даты оформите внеплановую командировку.");
+    }
+
+    if (trip.tripType !== "planned") return;
+
+    const planningMonth = trip.startDate.slice(0, 7);
+    const plansAlreadyConfirmed = (await storage.getAllTrips()).some((existingTrip) =>
+      existingTrip.id !== trip.id &&
+      existingTrip.tripType === "planned" &&
+      existingTrip.status === "planned" &&
+      existingTrip.startDate.slice(0, 7) === planningMonth,
+    );
+    if (plansAlreadyConfirmed) {
+      throw new Error("План командировок на этот месяц уже утвержден генеральным директором. Новые поездки оформляйте как внеплановые.");
     }
   }
 
   async function advanceApprovedTrip(trip: Trip, approver: User) {
     if (approver.role === "coordinator") {
       if (trip.status === "awaiting_ceo_signature") {
-        await storage.updateTrip(trip.id, { status: "planned" });
+        const ceo = await getRequiredWorkflowReviewer("ceo");
+        await createPendingApproval(trip.id, ceo.id);
         return;
       }
 
@@ -354,9 +374,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      const coordinator = await getRequiredWorkflowReviewer("coordinator");
+      const ceo = await getRequiredWorkflowReviewer("ceo");
       await storage.updateTrip(trip.id, { status: "awaiting_ceo_signature" });
-      await createPendingApproval(trip.id, coordinator.id);
+      await createPendingApproval(trip.id, ceo.id);
+      return;
+    }
+
+    if (approver.role === "ceo") {
+      if (trip.tripType !== "planned" || trip.status !== "awaiting_ceo_signature") {
+        throw new Error("Генеральный директор подтверждает только плановые командировки из реестра");
+      }
+      await storage.updateTrip(trip.id, { status: "planned" });
       return;
     }
 
@@ -861,7 +889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (data.status === "pending") {
-        assertTripPlanningWindow(data as Pick<Trip, "tripType" | "startDate" | "endDate">);
+        await assertTripPlanningWindow(data as Pick<Trip, "tripType" | "startDate" | "endDate">);
       }
 
       const trip = await storage.createTrip(data);
@@ -916,7 +944,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (data.status === "pending") {
-        assertTripPlanningWindow({
+        await assertTripPlanningWindow({
+          id: existingTrip.id,
           tripType: (data.tripType || existingTrip.tripType) as Trip["tripType"],
           startDate: nextStartDate,
           endDate: nextEndDate,

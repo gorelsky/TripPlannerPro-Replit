@@ -350,7 +350,9 @@ export default function Approvals() {
                             {trip.status === "coordinator_review"
                               ? "Проверить и передать ЗГД"
                               : trip.status === "awaiting_ceo_signature"
-                                ? "Подтвердить после подписи ГД"
+                                ? currentUser?.role === "ceo"
+                                  ? "Подтвердить плановую"
+                                  : "Передать ГД"
                                 : "Утвердить"}
                           </Button>
                           <Button

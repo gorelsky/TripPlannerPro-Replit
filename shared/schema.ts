@@ -22,7 +22,18 @@ export type UserRole =
   | "deputy_ceo"; // Заместитель генерального директора
 
 // Статусы командировки
-export type TripStatus = "draft" | "pending" | "manager_approved" | "director_approved" | "approved" | "rejected" | "rescheduling";
+export type TripStatus =
+  | "draft"
+  | "pending"
+  | "manager_approved"
+  | "director_approved"
+  | "coordinator_review"
+  | "deputy_review"
+  | "awaiting_ceo_signature"
+  | "planned"
+  | "approved"
+  | "rejected"
+  | "rescheduling";
 export type TripType = "planned" | "unplanned";
 export type TripMemoType = "unplanned" | "reschedule";
 

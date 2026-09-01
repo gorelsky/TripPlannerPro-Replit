@@ -945,7 +945,7 @@ export default function Trips() {
                               variant="ghost"
                               size="icon"
                               onClick={() => deleteMutation.mutate(trip.id)}
-                              disabled={deleteMutation.isPending || trip.status === "approved"}
+                              disabled={deleteMutation.isPending || ["approved", "planned"].includes(trip.status)}
                               data-testid={`button-delete-trip-${trip.id}`}
                             >
                               <Trash2 className="h-4 w-4" />

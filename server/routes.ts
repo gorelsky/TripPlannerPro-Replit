@@ -281,6 +281,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
 
+  async function getRequiredWorkflowReviewer(role: "coordinator" | "deputy_ceo") {
+    const reviewers = (await storage.getAllUsers()).filter((user) => user.role === role);
+    if (reviewers.length !== 1) {
+      const label = role === "coordinator" ? "координатора" : "заместителя ГД";
+      throw new Error(`Для маршрута согласования должен быть назначен один ${label}`);
+    }
+    return reviewers[0];
+  }
+
+  async function createPendingApproval(tripId: string, approverId: string) {
+    await storage.createApproval({ tripId, approverId, status: "pending" });
+  }
+
+  async function submitTripForWorkflow(trip: Trip) {
+    const employee = await storage.getUser(trip.employeeId);
+    if (!employee) throw new Error("Сотрудник для командировки не найден");
+
+    if (employee.managerId) {
+      await storage.updateTrip(trip.id, { status: "pending" });
+      await createPendingApproval(trip.id, employee.managerId);
+      return;
+    }
+
+    const coordinator = await getRequiredWorkflowReviewer("coordinator");
+    await storage.updateTrip(trip.id, { status: "coordinator_review" });
+    await createPendingApproval(trip.id, coordinator.id);
+  }
+
+  function getMoscowDateParts(date = new Date()) {
+    const values = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Moscow",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+    }).formatToParts(date);
+    const part = (type: string) => Number(values.find((value) => value.type === type)?.value);
+    return { year: part("year"), month: part("month"), day: part("day") };
+  }
+
+  function isNextMonthPlanWindow(trip: Pick<Trip, "tripType" | "startDate" | "endDate">) {
+    if (trip.tripType !== "planned") return true;
+    const today = getMoscowDateParts();
+    const nextMonth = today.month === 12 ? 1 : today.month + 1;
+    const nextYear = today.month === 12 ? today.year + 1 : today.year;
+    const expectedMonth = `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+    return today.day <= 25 && trip.startDate.startsWith(expectedMonth);
+  }
+
+  function assertTripPlanningWindow(trip: Pick<Trip, "tripType" | "startDate" | "endDate">) {
+    if (!isNextMonthPlanWindow(trip)) {
+      throw new Error("Плановую командировку можно отправить до 25-го числа текущего месяца и только на следующий месяц. Для другой даты оформите внеплановую командировку.");
+    }
+  }
+
+  async function advanceApprovedTrip(trip: Trip, approver: User) {
+    if (approver.role === "coordinator") {
+      if (trip.status === "awaiting_ceo_signature") {
+        await storage.updateTrip(trip.id, { status: "planned" });
+        return;
+      }
+
+      const deputy = await getRequiredWorkflowReviewer("deputy_ceo");
+      await storage.updateTrip(trip.id, { status: "deputy_review" });
+      await createPendingApproval(trip.id, deputy.id);
+      return;
+    }
+
+    if (approver.role === "deputy_ceo") {
+      if (trip.tripType === "unplanned") {
+        await storage.updateTrip(trip.id, { status: "approved" });
+        return;
+      }
+
+      const coordinator = await getRequiredWorkflowReviewer("coordinator");
+      await storage.updateTrip(trip.id, { status: "awaiting_ceo_signature" });
+      await createPendingApproval(trip.id, coordinator.id);
+      return;
+    }
+
+    const nextManager = approver.managerId ? await storage.getUser(approver.managerId) : undefined;
+    if (nextManager && nextManager.role !== "coordinator" && nextManager.role !== "deputy_ceo") {
+      await storage.updateTrip(trip.id, { status: "pending" });
+      await createPendingApproval(trip.id, nextManager.id);
+      return;
+    }
+
+    const coordinator = await getRequiredWorkflowReviewer("coordinator");
+    await storage.updateTrip(trip.id, { status: "coordinator_review" });
+    await createPendingApproval(trip.id, coordinator.id);
+  }
+
   function withoutPassword<T extends { password?: unknown }>(user: T) {
     const { password: _password, ...safeUser } = user;
     return safeUser;
@@ -769,44 +860,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "даты командировки пересекаются датой с другой командировкой" });
       }
 
+      if (data.status === "pending") {
+        assertTripPlanningWindow(data as Pick<Trip, "tripType" | "startDate" | "endDate">);
+      }
+
       const trip = await storage.createTrip(data);
       if (data.memoType === "reschedule" && data.sourceTripId) {
         await storage.updateTrip(data.sourceTripId, { status: "rescheduling" });
       }
       
-      // If status is pending, create approval request
+      // A submitted trip always starts with the employee's direct manager.
       if (trip.status === "pending") {
-        const employee = await storage.getUser(trip.employeeId);
-        if (employee) {
-          // Check if current user is the same as the employee
-          const isOwnTrip = currentUser?.id === data.employeeId;
-          
-          if (isOwnTrip && currentUser!.role && ["ceo", "admin"].includes(currentUser!.role)) {
-            // If CEO/Admin creates their OWN trip, approve it immediately
-            await storage.updateTrip(trip.id, { status: "approved" });
-          } else if (employee.role === "deputy_ceo" && !isOwnTrip) {
-            // If someone creates a trip for Deputy CEO (not by deputy_ceo themselves)
-            // Deputy CEO trips go straight to director_approved (awaiting admin/final approval)
-            await storage.updateTrip(trip.id, { status: "director_approved" });
-            
-            // For Deputy CEO, we find an admin to approve
-            const admins = (await storage.getAllUsers()).filter(u => u.role === "admin");
-            if (admins.length > 0) {
-              await storage.createApproval({
-                tripId: trip.id,
-                approverId: admins[0].id,
-                status: "pending",
-              });
-            }
-          } else if (employee.managerId) {
-            // Regular employee trips go to their manager
-            await storage.createApproval({
-              tripId: trip.id,
-              approverId: employee.managerId,
-              status: "pending",
-            });
-          }
-        }
+        await submitTripForWorkflow(trip);
       }
       
       const tripWithDetails = await storage.getTripWithDetails(trip.id);
@@ -850,15 +915,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Даты командировки пересекаются с другой командировкой" });
       }
 
+      if (data.status === "pending") {
+        assertTripPlanningWindow({
+          tripType: (data.tripType || existingTrip.tripType) as Trip["tripType"],
+          startDate: nextStartDate,
+          endDate: nextEndDate,
+        });
+      }
+
       const { employeeId: _employeeId, ...changes } = data;
       const trip = await storage.updateTrip(req.params.id, changes);
       if (!trip) return res.status(404).json({ error: "Trip not found" });
 
       if (trip.status === "pending") {
-        const employee = await storage.getUser(trip.employeeId);
-        if (employee?.managerId) {
-          await storage.createApproval({ tripId: trip.id, approverId: employee.managerId, status: "pending" });
-        }
+        await submitTripForWorkflow(trip);
       }
       
       const tripWithDetails = await storage.getTripWithDetails(trip.id);
@@ -895,9 +965,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
       if (currentUser.id !== req.params.managerId && !elevatedTripViewerRoles.has(currentUser.role || "")) {
         return res.status(403).json({ error: "You do not have access to these approvals" });
-      }
-      if (currentUser.userType !== "manager" && !elevatedTripViewerRoles.has(currentUser.role || "")) {
-        return res.status(403).json({ error: "Only managers can view approvals" });
       }
       const trips = await storage.getTripsForApproval(req.params.managerId);
       res.json(trips);
@@ -940,57 +1007,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Employee not found" });
       }
 
-      // Department-based access control: only managers of same department can approve (except admin/ceo)
-      const isAdmin = approver.role === "admin";
-      const isCeo = approver.role === "ceo";
-      const isDeputyCeo = approver.role === "deputy_ceo";
-      const isManager = approver.userType === "manager";
-      const isTerritorialManager = approver.role === "territorial_manager";
-
-      if (!isAdmin && !isCeo && !isDeputyCeo) {
-        if (!isManager || employee.department !== approver.department) {
-          return res.status(403).json({ error: "Only department managers can approve trips" });
-        }
-        // ТМ может согласовывать только прямых подчинённых (не всего отдела)
-        if (isTerritorialManager && employee.managerId !== approver.id) {
-          return res.status(403).json({ error: "Territorial manager can only approve their direct subordinates" });
-        }
+      const existingApprovals = await storage.getApprovalsByTrip(tripId);
+      const existingApproval = existingApprovals.find(
+        (approval) => approval.approverId === approverId && approval.status === "pending",
+      );
+      if (!existingApproval) {
+        return res.status(403).json({ error: "Сейчас не ваш этап согласования этой командировки" });
       }
-
-      let newTripStatus: TripStatus = trip.status;
 
       if (status === "rejected") {
-        newTripStatus = "rejected";
-      } else if (status === "approved") {
-        if (approver.role && ["ceo", "deputy_ceo", "admin"].includes(approver.role)) {
-          newTripStatus = "approved";
-        } else if (approver.role && ["marketing_director", "sales_director", "commerce_director"].includes(approver.role)) {
-          newTripStatus = "director_approved";
-        } else if (approver.role && ["territorial_manager", "commercial_manager", "product_manager", "kam"].includes(approver.role)) {
-          newTripStatus = "manager_approved";
-        } else {
-          // Если роль не специфическая, но он является руководителем
-          newTripStatus = "manager_approved";
-        }
-      }
-
-      // Update trip status
-      await storage.updateTrip(tripId, { status: newTripStatus });
-      
-      // Create or update approval record
-      const existingApprovals = await storage.getApprovalsByTrip(tripId);
-      const existingApproval = existingApprovals.find(a => a.approverId === approverId);
-      
-      if (existingApproval) {
-        await storage.updateApproval(existingApproval.id, { status: status as any, comment });
+        await storage.updateTrip(tripId, { status: "rejected" });
       } else {
-        await storage.createApproval({
-          tripId,
-          approverId,
-          status: status as any,
-          comment,
-        });
+        await advanceApprovedTrip(trip, approver);
       }
+      await storage.updateApproval(existingApproval.id, { status: status as any, comment });
       
       const tripWithDetails = await storage.getTripWithDetails(tripId);
       res.json(tripWithDetails);
@@ -1010,20 +1040,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nowStr = now.toISOString().split('T')[0];
 
       // Manager specific: trips from subordinates that need approval
-      const tripsForApproval = user.userType === "manager" || elevatedTripViewerRoles.has(user.role || "")
-        ? await storage.getTripsForApproval(user.id)
-        : [];
-      const pendingStatuses = ["pending", "manager_approved", "director_approved"];
+      const tripsForApproval = await storage.getTripsForApproval(user.id);
+      const pendingStatuses = ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"];
+      const confirmedStatuses = ["approved", "planned"];
 
       res.json({
         totalTrips: filteredTrips.length,
         pendingTrips: filteredTrips.filter(t => pendingStatuses.includes(t.status)).length,
-        approvedTrips: filteredTrips.filter(t => t.status === "approved").length,
+        approvedTrips: filteredTrips.filter(t => confirmedStatuses.includes(t.status)).length,
         activeTrips: filteredTrips.filter(t => 
-          t.status === "approved" && t.startDate <= nowStr && t.endDate >= nowStr
+          confirmedStatuses.includes(t.status) && t.startDate <= nowStr && t.endDate >= nowStr
         ).length,
         rejectedTrips: filteredTrips.filter(t => t.status === "rejected").length,
-        pendingApprovals: tripsForApproval.filter(t => pendingStatuses.includes(t.status)).length,
+        pendingApprovals: tripsForApproval.filter((trip) =>
+          trip.approvals?.some((approval) => approval.approverId === user.id && approval.status === "pending"),
+        ).length,
       });
     } catch (error) {
       console.error("[STATS] Dashboard stats error:", error);
@@ -1126,8 +1157,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Helper function to get report data
   const getReportData = async (periodStart: string, periodEnd: string) => {
-    // Get all approved trips
-    const allTrips = await storage.getTripsByStatus("approved");
+    const allTrips = (await storage.getAllTrips()).filter((trip) =>
+      ["approved", "awaiting_ceo_signature", "planned"].includes(trip.status),
+    );
     
     // Get daily allowance
     const allowance = await storage.getDailyAllowance();
@@ -2534,14 +2566,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const kilometers = tripKilometers(trip);
         const departmentRow = increment(departmentStats, department, { trips: 0, approved: 0, pending: 0, days: 0, estimatedCost: 0, kilometers: 0 });
         departmentRow.trips += 1;
-        departmentRow.approved += trip.status === "approved" ? 1 : 0;
-        departmentRow.pending += ["pending", "manager_approved", "director_approved"].includes(trip.status) ? 1 : 0;
+        departmentRow.approved += ["approved", "planned"].includes(trip.status) ? 1 : 0;
+        departmentRow.pending += ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"].includes(trip.status) ? 1 : 0;
         departmentRow.days += days;
         departmentRow.estimatedCost += estimatedCost;
         departmentRow.kilometers += kilometers;
         const employeeRow = increment(employeeStats, trip.employeeId, { trips: 0, approved: 0, days: 0, estimatedCost: 0, kilometers: 0 });
         employeeRow.trips += 1;
-        employeeRow.approved += trip.status === "approved" ? 1 : 0;
+        employeeRow.approved += ["approved", "planned"].includes(trip.status) ? 1 : 0;
         employeeRow.days += days;
         employeeRow.estimatedCost += estimatedCost;
         employeeRow.kilometers += kilometers;
@@ -2603,8 +2635,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         period: { from, to },
         summary: {
           trips: tripsInPeriod.length,
-          approved: tripsInPeriod.filter((trip) => trip.status === "approved").length,
-          pending: tripsInPeriod.filter((trip) => ["pending", "manager_approved", "director_approved"].includes(trip.status)).length,
+          approved: tripsInPeriod.filter((trip) => ["approved", "planned"].includes(trip.status)).length,
+          pending: tripsInPeriod.filter((trip) => ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"].includes(trip.status)).length,
           totalDays,
           totalEstimatedCost,
           totalKilometers,

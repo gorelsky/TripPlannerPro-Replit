@@ -11,6 +11,9 @@ import runApp from "./app";
 
 export async function setupVite(app: Express, server: Server) {
   const viteLogger = createLogger();
+  const resolvedViteConfig = typeof viteConfig === "function"
+    ? await viteConfig({ command: "serve", mode: "development", isSsrBuild: false, isPreview: false })
+    : viteConfig;
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
@@ -18,7 +21,7 @@ export async function setupVite(app: Express, server: Server) {
   };
 
   const vite = await createViteServer({
-    ...viteConfig,
+    ...resolvedViteConfig,
     configFile: false,
     customLogger: {
       ...viteLogger,

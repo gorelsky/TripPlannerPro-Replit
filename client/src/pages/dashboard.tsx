@@ -57,7 +57,7 @@ export default function Dashboard() {
     refetchInterval: 10000,
   });
 
-  const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo"].includes(user.role);
+  const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo", "coordinator"].includes(user.role);
   const isCoordinator = user?.role === "coordinator";
   const isAccountant = user?.role === "accountant";
 
@@ -74,7 +74,8 @@ export default function Dashboard() {
     enabled: !!(user && isManager),
   });
   const approvalTrips = approvalTripsData || [];
-  const pendingStatuses = ["pending", "manager_approved", "director_approved"];
+  const pendingStatuses = ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"];
+  const confirmedStatuses = ["approved", "planned"];
 
   // Refetch stats whenever trips change
   useEffect(() => {
@@ -87,7 +88,7 @@ export default function Dashboard() {
     if (!user || tripsLoading || shownTripNoticeForUser.current === user.id) return;
 
     const today = new Date().toISOString().slice(0, 10);
-    const relevantStatuses = ["pending", "manager_approved", "director_approved", "approved"];
+    const relevantStatuses = [...pendingStatuses, ...confirmedStatuses];
     const visibleTrips = trips.filter((trip) => {
       const isOwnTrip = trip.employeeId === user.id;
       const canSeeSubordinateTrip = user.userType === "manager";
@@ -134,14 +135,14 @@ export default function Dashboard() {
       modalTitle = `На согласовании (${stats?.pendingTrips || 0})`;
     }
   } else if (selectedStats === "approved") {
-    displayTrips = trips.filter(t => t.status === "approved");
+    displayTrips = trips.filter(t => confirmedStatuses.includes(t.status));
     modalTitle = `Утверждено (${stats?.approvedTrips || 0})`;
   } else if (selectedStats === "active") {
     const today = new Date();
     displayTrips = trips.filter(t => {
       const startDate = new Date(t.startDate);
       const endDate = new Date(t.endDate);
-      return t.status === "approved" && startDate <= today && endDate >= today;
+      return confirmedStatuses.includes(t.status) && startDate <= today && endDate >= today;
     });
     modalTitle = `Активных командировок (${displayTrips.length})`;
   }
@@ -150,7 +151,7 @@ export default function Dashboard() {
   const pendingTripsToApprove = approvalTrips;
 
   // User's own pending trips (for everyone)
-  const myPendingTrips = trips.filter(t => t.employeeId === user?.id && ["pending", "manager_approved", "director_approved"].includes(t.status));
+  const myPendingTrips = trips.filter(t => t.employeeId === user?.id && pendingStatuses.includes(t.status));
 
   // User's own rejected trips (for everyone, including managers)
   const myRejectedTrips = trips.filter(t => t.employeeId === user?.id && t.status === "rejected");
@@ -203,7 +204,7 @@ export default function Dashboard() {
       if (trip.startDate <= todayStr && trip.endDate >= todayStr) row.activeTrips += 1;
       if (trip.startDate > todayStr) row.upcomingTrips += 1;
       if (pendingStatuses.includes(trip.status)) row.pendingTrips += 1;
-      if (trip.status === "approved") row.approvedTrips += 1;
+      if (["approved", "planned"].includes(trip.status)) row.approvedTrips += 1;
       if (trip.startDate >= todayStr && (!row.nextTripDate || trip.startDate < row.nextTripDate)) {
         row.nextTripDate = trip.startDate;
       }

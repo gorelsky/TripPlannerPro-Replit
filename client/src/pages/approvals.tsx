@@ -55,23 +55,12 @@ const transportLabels: Record<TransportType, string> = {
 export default function Approvals() {
   const { user: currentUser } = useAuth();
 
-  // Role-aware status helpers
-  const userRole = currentUser?.role;
-  // Statuses that need THIS user's action
-  const myPendingStatuses: TripStatus[] = userRole && ["ceo", "deputy_ceo", "admin"].includes(userRole)
-    ? ["pending", "manager_approved", "director_approved"]
-    : userRole && ["sales_director", "commerce_director", "marketing_director"].includes(userRole)
-      ? ["pending", "manager_approved"]
-      : userRole === "territorial_manager"
-        ? ["pending"]
-        : ["pending", "manager_approved"];
-
-  // Statuses that mean "I already approved this"
-  const myApprovedStatuses: TripStatus[] = userRole && ["ceo", "deputy_ceo", "admin"].includes(userRole)
-    ? ["approved"]
-    : userRole && ["sales_director", "commerce_director", "marketing_director"].includes(userRole)
-      ? ["director_approved", "approved"]
-      : ["manager_approved", "director_approved", "approved"];
+  const hasPendingApproval = (trip: TripWithDetails) =>
+    trip.approvals?.some((approval) => approval.approverId === currentUser?.id && approval.status === "pending") ?? false;
+  const hasApprovedApproval = (trip: TripWithDetails) =>
+    trip.approvals?.some((approval) => approval.approverId === currentUser?.id && approval.status === "approved") ?? false;
+  const hasRejectedApproval = (trip: TripWithDetails) =>
+    trip.approvals?.some((approval) => approval.approverId === currentUser?.id && approval.status === "rejected") ?? false;
 
   const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [periodStart, setPeriodStart] = useState<Date>();
@@ -159,17 +148,17 @@ export default function Approvals() {
 
     if (statusFilter === "all") return true;
     if (statusFilter === "pending") {
-      return myPendingStatuses.includes(trip.status as TripStatus);
+      return hasPendingApproval(trip);
     }
     if (statusFilter === "approved") {
-      return myApprovedStatuses.includes(trip.status as TripStatus);
+      return hasApprovedApproval(trip);
     }
-    return trip.status === statusFilter;
+    return statusFilter === "rejected" && hasRejectedApproval(trip);
   });
 
-  const pendingCount = subordinateTrips.filter(t => myPendingStatuses.includes(t.status as TripStatus)).length;
-  const approvedCount = subordinateTrips.filter(t => myApprovedStatuses.includes(t.status as TripStatus)).length;
-  const rejectedCount = subordinateTrips.filter(t => t.status === "rejected").length;
+  const pendingCount = subordinateTrips.filter(hasPendingApproval).length;
+  const approvedCount = subordinateTrips.filter(hasApprovedApproval).length;
+  const rejectedCount = subordinateTrips.filter(hasRejectedApproval).length;
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -347,7 +336,7 @@ export default function Approvals() {
                         </div>
                       )}
 
-                      {myPendingStatuses.includes(trip.status as TripStatus) && (
+                      {hasPendingApproval(trip) && (
                         <div className="flex gap-2 pt-2">
                           <Button
                             onClick={(e) => {
@@ -358,7 +347,11 @@ export default function Approvals() {
                             data-testid={`button-approve-${trip.id}`}
                           >
                             <Check className="h-4 w-4 mr-2" />
-                            Утвердить
+                            {trip.status === "coordinator_review"
+                              ? "Проверить и передать ЗГД"
+                              : trip.status === "awaiting_ceo_signature"
+                                ? "Подтвердить после подписи ГД"
+                                : "Утвердить"}
                           </Button>
                           <Button
                             variant="destructive"

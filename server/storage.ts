@@ -628,42 +628,11 @@ export class PostgresStorage implements IStorage {
   async getTripsForApproval(managerId: string): Promise<TripWithDetails[]> {
     const allTrips = await this.getAllTrips();
     const result: TripWithDetails[] = [];
-    const manager = await this.getUser(managerId);
-    if (!manager) return result;
-    const isDepartmentLeader = manager.role != null && ["sales_director", "commerce_director", "marketing_director"].includes(manager.role);
-    const isCeoOrAdmin = manager.role != null && ["ceo", "deputy_ceo", "admin"].includes(manager.role);
-
-    // Statuses relevant for each role level:
-    // TM: sees "pending" (employee submitted, waiting for TM)
-    // Director: sees "pending" (no TM in chain) + "manager_approved" (TM approved, waiting for director)
-    // CEO/Admin: sees all non-final statuses
-    // Each role sees trips they need to act on PLUS trips they have already acted on
-    const relevantStatuses: string[] = isCeoOrAdmin
-      ? ["pending", "manager_approved", "director_approved", "approved", "rejected"]
-      : ["pending", "manager_approved", "director_approved", "approved", "rejected"];
 
     for (const trip of allTrips) {
-      if (!relevantStatuses.includes(trip.status)) continue;
-
       const details = await this.getTripWithDetails(trip.id);
       if (!details) continue;
-      const employee = details.employee;
-      if (!employee) continue;
-
-      if (isCeoOrAdmin) {
-        // Администратор и CEO видят все поездки всех сотрудников включая свои
-        result.push(details);
-      } else if (isDepartmentLeader) {
-        // Руководитель отдела видит сотрудников своего отдела и прямых подчинённых.
-        if (employee.id !== managerId && (employee.managerId === managerId || employee.department === manager.department)) {
-          result.push(details);
-        }
-      } else if (manager.userType === "manager") {
-        // Менеджер видит только прямых подчинённых (managerId = manager.id).
-        if (employee.managerId === managerId) {
-          result.push(details);
-        }
-      }
+      if (details.approvals?.some((approval) => approval.approverId === managerId)) result.push(details);
     }
 
     return result;

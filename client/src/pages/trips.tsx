@@ -59,6 +59,15 @@ import type { TripStatus, City, User, InsertTrip, TripWithDetails, Route, DailyA
 type MemoKind = "unplanned" | "cancel" | "reschedule" | "change";
 type UnplannedScenario = "new" | "reschedule";
 
+function isPlanningSubmissionClosed(date = new Date()) {
+  const values = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Moscow",
+    day: "numeric",
+  }).formatToParts(date);
+  const day = Number(values.find((value) => value.type === "day")?.value);
+  return day > 25;
+}
+
 export default function Trips() {
   const { user: currentUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
@@ -78,7 +87,7 @@ export default function Trips() {
     purpose: "",
     trivioBookingNumber: "",
     trivioBookingUrl: "",
-    tripType: "planned" as TripType,
+    tripType: (isPlanningSubmissionClosed() ? "unplanned" : "planned") as TripType,
     unplannedReason: "",
   });
   const [memoDialog, setMemoDialog] = useState<{ trip: TripWithDetails; kind: MemoKind } | null>(null);
@@ -235,7 +244,7 @@ export default function Trips() {
   });
 
   const resetForm = () => {
-    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", tripType: "planned", unplannedReason: "" });
+    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", tripType: isPlanningSubmissionClosed() ? "unplanned" : "planned", unplannedReason: "" });
     setUnplannedScenario("new");
     setSourceTripId("");
     setStartDate(undefined);
@@ -354,7 +363,7 @@ export default function Trips() {
       purpose: trip.purpose,
       trivioBookingNumber: trip.trivioBookingNumber || "",
       trivioBookingUrl: trip.trivioBookingUrl || "",
-      tripType: trip.tripType,
+      tripType: isPlanningSubmissionClosed() && trip.tripType === "planned" ? "unplanned" : trip.tripType,
       unplannedReason: trip.unplannedReason || "",
     });
     setUnplannedScenario(trip.memoType === "reschedule" ? "reschedule" : "new");
@@ -498,10 +507,15 @@ export default function Trips() {
                 }}>
                   <SelectTrigger id="trip-type"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="planned">Плановая</SelectItem>
+                    {!isPlanningSubmissionClosed() && <SelectItem value="planned">Плановая</SelectItem>}
                     <SelectItem value="unplanned">Внеплановая</SelectItem>
                   </SelectContent>
                 </Select>
+                {isPlanningSubmissionClosed() && (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Прием плановых поездок на следующий месяц завершен 25-го числа. Новые поездки оформляются как внеплановые.
+                  </p>
+                )}
               </div>
 
               {formData.tripType === "unplanned" && (

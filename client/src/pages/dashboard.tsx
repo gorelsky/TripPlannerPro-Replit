@@ -60,6 +60,7 @@ export default function Dashboard() {
   const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo", "coordinator"].includes(user.role);
   const isCoordinator = user?.role === "coordinator";
   const isAccountant = user?.role === "accountant";
+  const canViewAllTrips = user?.role && ["admin", "ceo", "deputy_ceo", "coordinator", "accountant"].includes(user.role);
 
   // Separate query for trips pending approval — uses server-side logic that correctly handles hierarchy
   const { data: approvalTripsData, isLoading: approvalTripsLoading } = useQuery<TripWithDetails[]>({
@@ -105,7 +106,7 @@ export default function Dashboard() {
     if (nearestTrip) setNearestTripNotice(nearestTrip);
   }, [trips, tripsLoading, user]);
 
-  const filteredTrips = isCoordinator || isAccountant
+  const filteredTrips = canViewAllTrips
     ? trips
     : trips.filter((trip) => trip.employeeId === user?.id);
 
@@ -148,7 +149,9 @@ export default function Dashboard() {
   }
 
   // Trips pending approval — fetched from server-side endpoint that correctly handles hierarchy
-  const pendingTripsToApprove = approvalTrips;
+  const pendingTripsToApprove = approvalTrips.filter((trip) =>
+    trip.approvals?.some((approval) => approval.approverId === user?.id && approval.status === "pending"),
+  );
 
   // User's own pending trips (for everyone)
   const myPendingTrips = trips.filter(t => t.employeeId === user?.id && pendingStatuses.includes(t.status));

@@ -281,15 +281,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
   const requiredWorkflowRoles = new Set(["coordinator", "deputy_ceo", "ceo"]);
+  const defaultWorkflowDeputyCeoName = "Горельский Евгений Александрович";
 
   async function getRequiredWorkflowReviewer(role: "coordinator" | "deputy_ceo" | "ceo") {
     const reviewers = (await storage.getAllUsers()).filter((user) => user.role === role);
+    if (role === "deputy_ceo") {
+      const configuredDeputyId = process.env.WORKFLOW_DEPUTY_CEO_ID?.trim();
+      const configuredDeputyName = process.env.WORKFLOW_DEPUTY_CEO_NAME?.trim() || defaultWorkflowDeputyCeoName;
+      const selectedDeputies = configuredDeputyId
+        ? reviewers.filter((user) => user.id === configuredDeputyId)
+        : reviewers.filter((user) => user.fullName === configuredDeputyName);
+      if (selectedDeputies.length === 1) return selectedDeputies[0];
+      throw new Error(`Для маршрута согласования должен быть назначен ЗГД: ${configuredDeputyName}`);
+    }
     if (reviewers.length !== 1) {
       const label = role === "coordinator"
         ? "координатора"
-        : role === "deputy_ceo"
-          ? "заместителя ГД"
-          : "генерального директора";
+        : "генерального директора";
       throw new Error(`Для маршрута согласования должен быть назначен один ${label}`);
     }
     return reviewers[0];

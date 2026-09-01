@@ -280,6 +280,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const elevatedTripViewerRoles = new Set(["admin", "ceo", "deputy_ceo"]);
   const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
+  const requiredWorkflowRoles = new Set(["coordinator", "deputy_ceo", "ceo"]);
 
   async function getRequiredWorkflowReviewer(role: "coordinator" | "deputy_ceo" | "ceo") {
     const reviewers = (await storage.getAllUsers()).filter((user) => user.role === role);
@@ -302,9 +303,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const employee = await storage.getUser(trip.employeeId);
     if (!employee) throw new Error("Сотрудник для командировки не найден");
 
-    if (employee.managerId) {
+    const directManager = employee.managerId ? await storage.getUser(employee.managerId) : undefined;
+    if (directManager && !requiredWorkflowRoles.has(directManager.role || "")) {
       await storage.updateTrip(trip.id, { status: "pending" });
-      await createPendingApproval(trip.id, employee.managerId);
+      await createPendingApproval(trip.id, directManager.id);
       return;
     }
 
@@ -369,27 +371,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     if (approver.role === "deputy_ceo") {
-      if (trip.tripType === "unplanned") {
-        await storage.updateTrip(trip.id, { status: "approved" });
-        return;
-      }
-
       const ceo = await getRequiredWorkflowReviewer("ceo");
-      await storage.updateTrip(trip.id, { status: "awaiting_ceo_signature" });
+      await storage.updateTrip(trip.id, {
+        status: trip.tripType === "planned" ? "awaiting_ceo_signature" : "ceo_review",
+      });
       await createPendingApproval(trip.id, ceo.id);
       return;
     }
 
     if (approver.role === "ceo") {
-      if (trip.tripType !== "planned" || trip.status !== "awaiting_ceo_signature") {
-        throw new Error("Генеральный директор подтверждает только плановые командировки из реестра");
+      if (trip.tripType === "planned" && trip.status === "awaiting_ceo_signature") {
+        await storage.updateTrip(trip.id, { status: "planned" });
+        return;
       }
-      await storage.updateTrip(trip.id, { status: "planned" });
-      return;
+      if (trip.tripType === "unplanned" && trip.status === "ceo_review") {
+        await storage.updateTrip(trip.id, { status: "approved" });
+        return;
+      }
+      throw new Error("Генеральный директор подтверждает командировки только на финальном этапе");
     }
 
     const nextManager = approver.managerId ? await storage.getUser(approver.managerId) : undefined;
-    if (nextManager && nextManager.role !== "coordinator" && nextManager.role !== "deputy_ceo") {
+    if (nextManager && !requiredWorkflowRoles.has(nextManager.role || "")) {
       await storage.updateTrip(trip.id, { status: "pending" });
       await createPendingApproval(trip.id, nextManager.id);
       return;
@@ -1070,7 +1073,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Manager specific: trips from subordinates that need approval
       const tripsForApproval = await storage.getTripsForApproval(user.id);
-      const pendingStatuses = ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"];
+      const pendingStatuses = ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "ceo_review", "awaiting_ceo_signature"];
       const confirmedStatuses = ["approved", "planned"];
 
       res.json({
@@ -2596,7 +2599,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const departmentRow = increment(departmentStats, department, { trips: 0, approved: 0, pending: 0, days: 0, estimatedCost: 0, kilometers: 0 });
         departmentRow.trips += 1;
         departmentRow.approved += ["approved", "planned"].includes(trip.status) ? 1 : 0;
-        departmentRow.pending += ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"].includes(trip.status) ? 1 : 0;
+        departmentRow.pending += ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "ceo_review", "awaiting_ceo_signature"].includes(trip.status) ? 1 : 0;
         departmentRow.days += days;
         departmentRow.estimatedCost += estimatedCost;
         departmentRow.kilometers += kilometers;
@@ -2665,7 +2668,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         summary: {
           trips: tripsInPeriod.length,
           approved: tripsInPeriod.filter((trip) => ["approved", "planned"].includes(trip.status)).length,
-          pending: tripsInPeriod.filter((trip) => ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"].includes(trip.status)).length,
+          pending: tripsInPeriod.filter((trip) => ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "ceo_review", "awaiting_ceo_signature"].includes(trip.status)).length,
           totalDays,
           totalEstimatedCost,
           totalKilometers,

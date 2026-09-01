@@ -353,6 +353,8 @@ export default function Approvals() {
                                 ? currentUser?.role === "ceo"
                                   ? "Подтвердить плановую"
                                   : "Передать ГД"
+                                : trip.status === "ceo_review" && currentUser?.role === "ceo"
+                                  ? "Утвердить командировку"
                                 : "Утвердить"}
                           </Button>
                           <Button

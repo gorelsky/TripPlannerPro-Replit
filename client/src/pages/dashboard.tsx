@@ -75,7 +75,7 @@ export default function Dashboard() {
     enabled: !!(user && isManager),
   });
   const approvalTrips = approvalTripsData || [];
-  const pendingStatuses = ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "awaiting_ceo_signature"];
+  const pendingStatuses = ["pending", "manager_approved", "director_approved", "coordinator_review", "deputy_review", "ceo_review", "awaiting_ceo_signature"];
   const confirmedStatuses = ["approved", "planned"];
 
   // Refetch stats whenever trips change

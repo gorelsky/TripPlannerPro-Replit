@@ -29,6 +29,7 @@ export type TripStatus =
   | "director_approved"
   | "coordinator_review"
   | "deputy_review"
+  | "ceo_review"
   | "awaiting_ceo_signature"
   | "planned"
   | "approved"

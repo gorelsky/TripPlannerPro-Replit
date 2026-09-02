@@ -111,6 +111,34 @@ export default function Approvals() {
     },
   });
 
+  const plannedTripsForBatchApproval = subordinateTrips.filter((trip) =>
+    trip.tripType === "planned" &&
+    trip.status === "awaiting_ceo_signature" &&
+    hasPendingApproval(trip),
+  );
+  const batchApproveMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/approvals/approve-planned-batch");
+      return response.json() as Promise<{ updated: number }>;
+    },
+    onSuccess: ({ updated }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/approvals/pending", currentUser?.id] });
+      queryClient.invalidateQueries({ queryKey: [`/api/stats/dashboard/${currentUser?.id}`] });
+      toast({
+        title: "Плановые командировки подтверждены",
+        description: `Утверждено заявок: ${updated}.`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Ошибка",
+        description: "Не удалось пакетно подтвердить плановые командировки",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleApprove = (tripId: string) => {
     setApprovalDialog({ open: true, type: "approve", tripId });
   };
@@ -226,6 +254,18 @@ export default function Approvals() {
               <CardDescription>Заявки на командировки от подчиненных</CardDescription>
             </div>
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
+              {currentUser?.role === "ceo" && plannedTripsForBatchApproval.length > 0 && (
+                <Button
+                  onClick={() => batchApproveMutation.mutate()}
+                  disabled={batchApproveMutation.isPending}
+                  data-testid="button-approve-all-planned"
+                >
+                  <CheckSquare className="mr-2 h-4 w-4" />
+                  {batchApproveMutation.isPending
+                    ? "Подтверждение..."
+                    : `Утвердить все плановые (${plannedTripsForBatchApproval.length})`}
+                </Button>
+              )}
               <div className="flex flex-col gap-1 rounded-md border bg-muted/20 p-2 sm:flex-row sm:items-center sm:gap-2 sm:px-2 sm:py-1">
                 <CalendarIcon className="hidden h-4 w-4 text-muted-foreground sm:block" />
                 <Input

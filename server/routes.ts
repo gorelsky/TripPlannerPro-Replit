@@ -1014,6 +1014,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============ APPROVALS ============
+
+  // Confirm every planned trip that is waiting for the CEO after the registry is signed.
+  app.post("/api/approvals/approve-planned-batch", async (req, res) => {
+    try {
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      const approver = await storage.getUser(req.session.userId);
+      if (!approver || approver.role !== "ceo") {
+        return res.status(403).json({ error: "Пакетное подтверждение плановых командировок доступно только генеральному директору" });
+      }
+
+      const approvalTrips = await storage.getTripsForApproval(approver.id);
+      const plannedTripsToApprove = approvalTrips.flatMap((trip) => {
+        const pendingApproval = trip.approvals?.find(
+          (approval) => approval.approverId === approver.id && approval.status === "pending",
+        );
+        return trip.tripType === "planned" && trip.status === "awaiting_ceo_signature" && pendingApproval
+          ? [{ trip, approval: pendingApproval }]
+          : [];
+      });
+
+      for (const { trip, approval } of plannedTripsToApprove) {
+        await storage.updateTrip(trip.id, { status: "planned" });
+        await storage.updateApproval(approval.id, {
+          status: "approved",
+          comment: "Пакетно подтверждено генеральным директором",
+        });
+      }
+
+      res.json({ updated: plannedTripsToApprove.length });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Не удалось подтвердить плановые командировки" });
+    }
+  });
   
   // Approve or reject trip
   app.post("/api/approvals/:tripId", async (req, res) => {

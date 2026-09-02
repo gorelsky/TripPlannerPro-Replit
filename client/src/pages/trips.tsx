@@ -95,6 +95,7 @@ export default function Trips() {
     unplannedReason: "",
   });
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [adminEditStatus, setAdminEditStatus] = useState<TripStatus>("draft");
   const [memoDialog, setMemoDialog] = useState<{ trip: TripWithDetails; kind: MemoKind } | null>(null);
   const [memoFields, setMemoFields] = useState({ reason: "", place: "", travelCost: "", accommodationCost: "", otherCost: "", newStartDate: "", newEndDate: "", newPurpose: "" });
   const [isGeneratingMemo, setIsGeneratingMemo] = useState(false);
@@ -253,6 +254,7 @@ export default function Trips() {
   const resetForm = () => {
     setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", clientsToVisit: "", tripType: defaultTripType, unplannedReason: "" });
     setSelectedEmployeeId(currentUser?.id || "");
+    setAdminEditStatus("draft");
     setUnplannedScenario("new");
     setSourceTripId("");
     setStartDate(undefined);
@@ -367,6 +369,8 @@ export default function Trips() {
   const startEditDraft = (trip: TripWithDetails) => {
     resetForm();
     setEditingTrip(trip);
+    setSelectedEmployeeId(trip.employeeId);
+    setAdminEditStatus(trip.status);
     setFormData({
       cityId: trip.cityId || "",
       routeId: trip.routeId,
@@ -449,13 +453,13 @@ export default function Trips() {
           </DialogTrigger>
           <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
             <DialogHeader>
-              <DialogTitle>{editingTrip ? "Редактировать черновик" : "Создать командировку"}</DialogTitle>
+              <DialogTitle>{editingTrip ? (isAdmin ? "Редактировать командировку" : "Редактировать черновик") : "Создать командировку"}</DialogTitle>
               <DialogDescription>
-                {editingTrip ? "Скорректируйте данные и сохраните черновик или отправьте его на согласование" : "Заполните информацию о планируемой командировке"}
+                {editingTrip ? (isAdmin ? "Администратор может изменить все данные и установить любой статус командировки." : "Скорректируйте данные и сохраните черновик или отправьте его на согласование") : "Заполните информацию о планируемой командировке"}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              {isAdmin && !editingTrip && (
+              {isAdmin && (
                 <div className="grid gap-2">
                   <Label htmlFor="trip-employee">Сотрудник *</Label>
                   <Select value={selectedEmployeeId} onValueChange={(employeeId) => {
@@ -559,6 +563,21 @@ export default function Trips() {
                   </p>
                 )}
               </div>
+
+              {isAdmin && editingTrip && (
+                <div className="grid gap-2 rounded-md border border-amber-300 bg-amber-50/50 p-3">
+                  <Label htmlFor="trip-status">Статус командировки</Label>
+                  <Select value={adminEditStatus} onValueChange={(value) => setAdminEditStatus(value as TripStatus)}>
+                    <SelectTrigger id="trip-status" data-testid="select-admin-trip-status"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(statusLabels).map(([status, label]) => (
+                        <SelectItem key={status} value={status}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Ручная смена статуса не удаляет ранее созданную историю согласований.</p>
+                </div>
+              )}
 
               {formData.tripType === "unplanned" && (
                 <div className="grid gap-4 rounded-md border bg-muted/20 p-3">
@@ -759,24 +778,37 @@ export default function Trips() {
               <Button className="w-full sm:w-auto" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Отмена
               </Button>
-              <Button 
-                className="w-full sm:w-auto"
-                variant="outline" 
-                onClick={() => handleSubmit("draft")}
-                disabled={createMutation.isPending || updateMutation.isPending}
-                data-testid="button-save-draft"
-              >
-                {updateMutation.isPending ? "Сохранение..." : "Сохранить черновик"}
-              </Button>
-              <Button 
-                className="w-full sm:w-auto"
-                onClick={() => handleSubmit("pending")}
-                disabled={createMutation.isPending || updateMutation.isPending}
-                data-testid="button-submit-trip"
-              >
-                <Send className="h-4 w-4 mr-2" />
-                {createMutation.isPending || updateMutation.isPending ? "Отправка..." : "Отправить на согласование"}
-              </Button>
+              {isAdmin && editingTrip ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={() => handleSubmit(adminEditStatus)}
+                  disabled={updateMutation.isPending}
+                  data-testid="button-save-admin-trip"
+                >
+                  {updateMutation.isPending ? "Сохранение..." : "Сохранить изменения"}
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    className="w-full sm:w-auto"
+                    variant="outline"
+                    onClick={() => handleSubmit("draft")}
+                    disabled={createMutation.isPending || updateMutation.isPending}
+                    data-testid="button-save-draft"
+                  >
+                    {updateMutation.isPending ? "Сохранение..." : "Сохранить черновик"}
+                  </Button>
+                  <Button
+                    className="w-full sm:w-auto"
+                    onClick={() => handleSubmit("pending")}
+                    disabled={createMutation.isPending || updateMutation.isPending}
+                    data-testid="button-submit-trip"
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {createMutation.isPending || updateMutation.isPending ? "Отправка..." : "Отправить на согласование"}
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -985,13 +1017,13 @@ export default function Trips() {
                               </DropdownMenuContent>
                             </DropdownMenu>
                     }
-                    {trip.status === "draft" ? (
+                    {(isAdmin || trip.status === "draft") ? (
                       <Button
                         variant="outline"
                         size="sm"
                         className="h-8 gap-1 px-2"
                         onClick={() => startEditDraft(trip)}
-                        aria-label="Редактировать черновик"
+                        aria-label={isAdmin ? "Редактировать командировку" : "Редактировать черновик"}
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         Редактировать

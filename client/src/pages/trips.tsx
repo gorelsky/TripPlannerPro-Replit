@@ -90,6 +90,7 @@ export default function Trips() {
     purpose: "",
     trivioBookingNumber: "",
     trivioBookingUrl: "",
+    clientsToVisit: "",
     tripType: defaultTripType,
     unplannedReason: "",
   });
@@ -133,6 +134,10 @@ export default function Trips() {
       return res.json();
     },
   });
+
+  const selectedTripEmployeeId = isAdmin ? selectedEmployeeId : currentUser?.id;
+  const selectedTripEmployee = users.find((user) => user.id === selectedTripEmployeeId) || currentUser;
+  const isMedicalRepTrip = selectedTripEmployee?.role === "medical_rep";
 
   const { data: routes = [] } = useQuery<Route[]>({
     queryKey: ["/api/routes"],
@@ -246,7 +251,7 @@ export default function Trips() {
   });
 
   const resetForm = () => {
-    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", tripType: defaultTripType, unplannedReason: "" });
+    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", clientsToVisit: "", tripType: defaultTripType, unplannedReason: "" });
     setSelectedEmployeeId(currentUser?.id || "");
     setUnplannedScenario("new");
     setSourceTripId("");
@@ -299,6 +304,7 @@ export default function Trips() {
       purpose: formData.purpose,
       trivioBookingNumber: formData.trivioBookingNumber.trim() || undefined,
       trivioBookingUrl: formData.trivioBookingUrl.trim() || undefined,
+      clientsToVisit: isMedicalRepTrip && formData.clientsToVisit !== "" ? Number(formData.clientsToVisit) : undefined,
       tripType: formData.tripType,
       status,
     };
@@ -368,6 +374,7 @@ export default function Trips() {
       purpose: trip.purpose,
       trivioBookingNumber: trip.trivioBookingNumber || "",
       trivioBookingUrl: trip.trivioBookingUrl || "",
+      clientsToVisit: trip.clientsToVisit?.toString() || "",
       tripType: !isAdmin && isPlanningSubmissionClosed() && trip.tripType === "planned" ? "unplanned" : trip.tripType,
       unplannedReason: trip.unplannedReason || "",
     });
@@ -451,7 +458,10 @@ export default function Trips() {
               {isAdmin && !editingTrip && (
                 <div className="grid gap-2">
                   <Label htmlFor="trip-employee">Сотрудник *</Label>
-                  <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
+                  <Select value={selectedEmployeeId} onValueChange={(employeeId) => {
+                    setSelectedEmployeeId(employeeId);
+                    setFormData((current) => ({ ...current, clientsToVisit: "" }));
+                  }}>
                     <SelectTrigger id="trip-employee" data-testid="select-trip-employee">
                       <SelectValue placeholder="Выберите сотрудника" />
                     </SelectTrigger>
@@ -711,6 +721,27 @@ export default function Trips() {
                   data-testid="input-trip-purpose"
                 />
               </div>
+
+              {isMedicalRepTrip && (
+                <div className="grid gap-2">
+                  <Label htmlFor="clients-to-visit">Количество клиентов для посещения</Label>
+                  <Input
+                    id="clients-to-visit"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={formData.clientsToVisit}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (/^\d*$/.test(value)) {
+                        setFormData({ ...formData, clientsToVisit: value });
+                      }
+                    }}
+                    placeholder="Например, 12"
+                    data-testid="input-clients-to-visit"
+                  />
+                </div>
+              )}
 
               {startDate && endDate && (
                 <div className="flex flex-col items-start gap-2 rounded-md border bg-muted/50 p-3 sm:flex-row sm:items-center sm:justify-between">

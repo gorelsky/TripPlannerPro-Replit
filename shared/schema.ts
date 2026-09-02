@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, date } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, date, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -76,6 +76,7 @@ export const trips = pgTable("trip_planner_trips", {
   transportType: text("transport_type").$type<TransportType>().notNull().default("car"), // Вид транспорта
   trivioBookingNumber: text("trivio_booking_number"), // Номер бронирования в Trivio
   trivioBookingUrl: text("trivio_booking_url"), // Ссылка на бронирование в Trivio
+  clientsToVisit: integer("clients_to_visit"), // Количество клиентов для посещения (для МП)
   tripType: text("trip_type").$type<TripType>().notNull().default("planned"),
   unplannedReason: text("unplanned_reason"),
   sourceTripId: varchar("source_trip_id"), // Исходная поездка при переносе
@@ -189,6 +190,7 @@ export const insertTripSchema = createInsertSchema(trips).omit({
 }).extend({
   startDate: z.string(),
   endDate: z.string(),
+  clientsToVisit: z.number().int().nonnegative().nullable().optional(),
 });
 
 export const insertApprovalSchema = createInsertSchema(approvals).omit({
@@ -237,8 +239,6 @@ export type TripWithDetails = Trip & {
   route: Route;
   approvals?: ApprovalWithApprover[];
 };
-import { jsonb, integer } from "drizzle-orm/pg-core";
-
 export const eventLog = pgTable("trip_planner_event_log", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
 

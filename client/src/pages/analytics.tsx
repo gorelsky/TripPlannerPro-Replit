@@ -23,7 +23,7 @@ type AnalyticsData = {
 };
 
 const statusLabels: Record<string, string> = {
-  draft: "Черновик", pending: "На согласовании", manager_approved: "Согласовано руководителем", director_approved: "На финальном согласовании", approved: "Согласовано", rejected: "Отклонено", rescheduling: "Перенос",
+  draft: "Черновик", pending: "На согласовании", manager_approved: "Согласовано руководителем", director_approved: "На финальном согласовании", coordinator_review: "Проверка координатора", deputy_review: "Ожидает ЗГД", ceo_review: "Ожидает ГД", awaiting_ceo_signature: "В реестре на подпись ГД", planned: "Плановая", approved: "Согласовано", rejected: "Отклонено", rescheduling: "Перенос",
 };
 const colors = ["#2563eb", "#0f766e", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#4d7c0f"];
 const formatMoney = (value: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value) + " ₽";
@@ -49,10 +49,12 @@ function EmptyState({ text }: { text: string }) {
 }
 
 export default function Analytics() {
-  const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
-  const [to, setTo] = useState(today);
-  const [appliedPeriod, setAppliedPeriod] = useState({ from: `${new Date().getFullYear()}-01-01`, to: today });
+  const currentYear = new Date().getFullYear();
+  const defaultFrom = `${currentYear}-01-01`;
+  const defaultTo = `${currentYear}-12-31`;
+  const [from, setFrom] = useState(defaultFrom);
+  const [to, setTo] = useState(defaultTo);
+  const [appliedPeriod, setAppliedPeriod] = useState({ from: defaultFrom, to: defaultTo });
   const { data, isLoading, isFetching, error } = useQuery<AnalyticsData>({
     queryKey: ["/api/analytics", appliedPeriod],
     queryFn: async () => {
@@ -75,7 +77,7 @@ export default function Analytics() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2"><BarChart3 className="h-6 w-6 text-primary" /><h1 className="text-xl font-semibold sm:text-2xl">Аналитика</h1></div>
-          <p className="mt-1 text-sm text-muted-foreground">Командировки, расчётные суточные, согласования и активность чата</p>
+          <p className="mt-1 text-sm text-muted-foreground">Командировки всех сотрудников, расчётные суточные, согласования и активность чата</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
           <label className="grid gap-1 text-xs text-muted-foreground">Начало<Input type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} /></label>

@@ -31,11 +31,14 @@ export function TripsReport() {
   const [search, setSearch] = useState("");
   const isPeriodValid = Boolean(periodStart && periodEnd && periodStart <= periodEnd);
 
-  const { data: report, isLoading } = useQuery<TripsReportData>({
+  const { data: report, isLoading, isError, error } = useQuery<TripsReportData>({
     queryKey: ["/api/admin/trips-report", periodStart, periodEnd],
     queryFn: async () => {
       const res = await fetch(`/api/admin/trips-report?startDate=${periodStart}&endDate=${periodEnd}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch report");
+      if (!res.ok) {
+        const response = await res.json().catch(() => null);
+        throw new Error(response?.error || "Не удалось сформировать реестр");
+      }
       return res.json();
     },
     enabled: isPeriodValid,
@@ -57,7 +60,7 @@ export function TripsReport() {
   const visibleWithAllowance = (report?.withAllowance || []).filter(matchesTripSearch);
   const visibleWithoutAllowance = (report?.withoutAllowance || []).filter(matchesTripSearch);
 
-  const handleExportReport = () => {
+  const handleExportReport = async () => {
     if (!isPeriodValid) {
       toast({ title: "Проверьте период", description: "Дата окончания не может быть раньше даты начала.", variant: "destructive" });
       return;
@@ -65,16 +68,23 @@ export function TripsReport() {
 
     setIsExporting(true);
     try {
+      const response = await fetch(`/api/admin/trips-report/export?startDate=${periodStart}&endDate=${periodEnd}`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const responseBody = await response.json().catch(() => null);
+        throw new Error(responseBody?.error || "Не удалось выгрузить реестр");
+      }
+
       const filename = `Реестр_командировок_${periodStart}_по_${periodEnd}.xlsx`;
-      
+      const file = await response.blob();
       const link = document.createElement("a");
-      link.href = `/api/admin/trips-report/export?startDate=${periodStart}&endDate=${periodEnd}`;
+      link.href = URL.createObjectURL(file);
       link.download = filename;
-      link.style.display = "none";
-      
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      link.remove();
+      URL.revokeObjectURL(link.href);
       
       toast({
         title: "Успешно",
@@ -157,6 +167,14 @@ export function TripsReport() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-muted-foreground">Загрузка...</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {isError && (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-destructive">{error instanceof Error ? error.message : "Не удалось сформировать реестр"}</p>
           </CardContent>
         </Card>
       )}

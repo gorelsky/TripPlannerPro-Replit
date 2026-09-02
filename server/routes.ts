@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "crypto";
+import ExcelJS from "exceljs";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";
@@ -1314,7 +1315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(data);
     } catch (error) {
       console.error("Report error:", error);
-      res.status(500).json({ error: "Failed to generate report" });
+      res.status(422).json({ error: error instanceof Error ? error.message : "Не удалось сформировать реестр" });
     }
   });
 
@@ -1329,8 +1330,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await getReportData(period.startDate, period.endDate);
       console.log(`[EXPORT] Report data ready: ${data.withAllowance.length} with allowance, ${data.withoutAllowance.length} without`);
       
-      // Dynamically import ExcelJS
-      const ExcelJS = (await import("exceljs")).default;
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Реестр командировок");
       
@@ -1457,7 +1456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(buffer);
     } catch (error) {
       console.error("Export error:", error);
-      res.status(500).json({ error: "Failed to export report" });
+      res.status(422).json({ error: error instanceof Error ? error.message : "Не удалось выгрузить реестр" });
     }
   });
 
@@ -2261,7 +2260,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(data);
     } catch (error) {
       console.error("Report error:", error);
-      res.status(500).json({ error: "Failed to generate report" });
+      res.status(422).json({ error: error instanceof Error ? error.message : "Не удалось сформировать реестр" });
     }
   });
 
@@ -2276,8 +2275,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await getReportData(period.startDate, period.endDate);
       console.log(`[EXPORT] Report data ready: ${data.withAllowance.length} with allowance, ${data.withoutAllowance.length} without`);
       
-      // Dynamically import ExcelJS
-      const ExcelJS = (await import("exceljs")).default;
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Реестр командировок");
       
@@ -2404,7 +2401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(buffer);
     } catch (error) {
       console.error("Export error:", error);
-      res.status(500).json({ error: "Failed to export report" });
+      res.status(422).json({ error: error instanceof Error ? error.message : "Не удалось выгрузить реестр" });
     }
   });
 

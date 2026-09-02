@@ -1042,6 +1042,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      if (plannedTripsToApprove.length > 0) {
+        const recipients = (await storage.getAllUsers()).filter((user) =>
+          ["admin", "coordinator"].includes(user.role || "") && user.id !== approver.id,
+        );
+        const months = Array.from(new Set(plannedTripsToApprove.map(({ trip }) => trip.startDate.slice(0, 7))))
+          .sort()
+          .join(", ");
+        await Promise.all(recipients.map((recipient) => storage.saveChatMessage({
+          fromUserId: approver.id,
+          toUserId: recipient.id,
+          message: `Генеральный директор пакетно подтвердил плановые командировки (${plannedTripsToApprove.length}) за период ${months}. Можно сформировать и выгрузить утвержденный реестр.`,
+        })));
+      }
+
       res.json({ updated: plannedTripsToApprove.length });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Не удалось подтвердить плановые командировки" });
@@ -1230,8 +1244,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Helper function to get report data
   const getReportData = async (periodStart: string, periodEnd: string) => {
-    const allTrips = (await storage.getAllTrips()).filter((trip) =>
-      ["approved", "awaiting_ceo_signature", "planned"].includes(trip.status),
+    const allTrips = await storage.getAllTrips();
+    const tripsInRequestedPeriod = allTrips.filter((trip) =>
+      trip.startDate <= periodEnd && trip.endDate >= periodStart,
+    );
+    const unconfirmedPlannedTrips = tripsInRequestedPeriod.filter((trip) =>
+      trip.tripType === "planned" && trip.status !== "planned",
+    );
+    if (unconfirmedPlannedTrips.length > 0) {
+      throw new Error("Нельзя сформировать новый реестр: в выбранном периоде есть плановые командировки, ещё не подтверждённые генеральным директором");
+    }
+    const approvedTrips = tripsInRequestedPeriod.filter((trip) =>
+      ["approved", "planned"].includes(trip.status),
     );
     
     // Get daily allowance
@@ -1240,11 +1264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     // A trip belongs to the registry when it overlaps the requested period.
     const tripsInPeriod = await Promise.all(
-      allTrips
-        .filter(trip => {
-          return trip.startDate <= periodEnd && trip.endDate >= periodStart;
-        })
-        .map(async (trip) => {
+      approvedTrips.map(async (trip) => {
           const details = await storage.getTripWithDetails(trip.id);
           if (!details) return null;
           

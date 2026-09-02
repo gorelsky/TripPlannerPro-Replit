@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, Search } from "lucide-react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +28,7 @@ export function TripsReport() {
   const [periodStart, setPeriodStart] = useState(format(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1), "yyyy-MM-dd"));
   const [periodEnd, setPeriodEnd] = useState(format(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0), "yyyy-MM-dd"));
   const [isExporting, setIsExporting] = useState(false);
+  const [search, setSearch] = useState("");
   const isPeriodValid = Boolean(periodStart && periodEnd && periodStart <= periodEnd);
 
   const { data: report, isLoading } = useQuery<TripsReportData>({
@@ -39,6 +40,22 @@ export function TripsReport() {
     },
     enabled: isPeriodValid,
   });
+
+  const matchesTripSearch = (trip: any) => {
+    const query = search.trim().toLocaleLowerCase("ru-RU");
+    if (!query) return true;
+    return [
+      trip.number,
+      trip.employee?.fullName,
+      trip.employee?.department,
+      trip.route?.path,
+      trip.transportType,
+      trip.startDate,
+      trip.endDate,
+    ].some((value) => String(value || "").toLocaleLowerCase("ru-RU").includes(query));
+  };
+  const visibleWithAllowance = (report?.withAllowance || []).filter(matchesTripSearch);
+  const visibleWithoutAllowance = (report?.withoutAllowance || []).filter(matchesTripSearch);
 
   const handleExportReport = () => {
     if (!isPeriodValid) {
@@ -86,7 +103,7 @@ export function TripsReport() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <label className="mb-2 block text-sm font-medium">Начало периода</label>
                 <Input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} />
@@ -117,6 +134,20 @@ export function TripsReport() {
                   )}
                 </Button>
               </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium">Поиск в реестре</label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="ФИО, отдел, маршрут"
+                    className="pl-9"
+                    data-testid="input-search-trips-report"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -137,7 +168,7 @@ export function TripsReport() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">
-                  Командировки с суточными ({report.withAllowance.length})
+                  Командировки с суточными ({visibleWithAllowance.length} из {report.withAllowance.length})
                 </CardTitle>
                 <CardDescription>
                   Суточные: {report.amountPerNight} руб/сутки
@@ -159,7 +190,11 @@ export function TripsReport() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {report.withAllowance.map((trip) => {
+                      {visibleWithAllowance.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                        </TableRow>
+                      ) : visibleWithAllowance.map((trip) => {
                         const startDate = new Date(trip.startDate);
                         const endDate = new Date(trip.endDate);
                         const tripDates = `${format(startDate, "dd.MM")} - ${format(endDate, "dd.MM")}`;
@@ -185,10 +220,12 @@ export function TripsReport() {
                           </TableRow>
                         );
                       })}
-                      <TableRow className="border-t-2 font-bold">
-                        <TableCell colSpan={7} className="text-right">Итого по суточным:</TableCell>
-                        <TableCell className="text-right">{report.totalWithAllowance.toLocaleString("ru-RU")} ₽</TableCell>
-                      </TableRow>
+                      {visibleWithAllowance.length > 0 && (
+                        <TableRow className="border-t-2 font-bold">
+                          <TableCell colSpan={7} className="text-right">Итого по найденным:</TableCell>
+                          <TableCell className="text-right">{visibleWithAllowance.reduce((total, trip) => total + trip.totalAllowance, 0).toLocaleString("ru-RU")} ₽</TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </StickyScrollTable>
@@ -201,7 +238,7 @@ export function TripsReport() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">
-                  Командировки без суточных ({report.withoutAllowance.length})
+                  Командировки без суточных ({visibleWithoutAllowance.length} из {report.withoutAllowance.length})
                 </CardTitle>
                 <CardDescription>
                   Командировки без суточных
@@ -223,7 +260,11 @@ export function TripsReport() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {report.withoutAllowance.map((trip) => {
+                      {visibleWithoutAllowance.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                        </TableRow>
+                      ) : visibleWithoutAllowance.map((trip) => {
                         const startDate = new Date(trip.startDate);
                         const endDate = new Date(trip.endDate);
                         const tripDates = `${format(startDate, "dd.MM")} - ${format(endDate, "dd.MM")}`;
@@ -249,10 +290,12 @@ export function TripsReport() {
                           </TableRow>
                         );
                       })}
-                      <TableRow className="border-t-2 font-bold">
-                        <TableCell colSpan={7} className="text-right">Итого по без суточных:</TableCell>
-                        <TableCell className="text-right">{report.totalWithoutAllowance.toLocaleString("ru-RU")} ₽</TableCell>
-                      </TableRow>
+                      {visibleWithoutAllowance.length > 0 && (
+                        <TableRow className="border-t-2 font-bold">
+                          <TableCell colSpan={7} className="text-right">Итого по найденным:</TableCell>
+                          <TableCell className="text-right">0 ₽</TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </StickyScrollTable>

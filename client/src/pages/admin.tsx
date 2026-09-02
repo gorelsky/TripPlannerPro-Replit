@@ -49,7 +49,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExcelJS from "exceljs";
-import { LogOut, Plus, Trash2, Copy, Download, ArrowRight, Upload, RotateCcw, AlertTriangle, FileUp, Pencil, KeyRound, Mail, MailOpen, Paperclip, ExternalLink } from "lucide-react";
+import { LogOut, Plus, Trash2, Copy, Download, ArrowRight, Upload, RotateCcw, AlertTriangle, FileUp, Pencil, KeyRound, Mail, MailOpen, Paperclip, ExternalLink, Search } from "lucide-react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { roleLabels, roleShortLabels, determineRoleFromJobTitle } from "@/lib/role-utils";
@@ -64,6 +64,18 @@ export default function Admin() {
   const { toast } = useToast();
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [isSendingCredentials, setIsSendingCredentials] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [citySearch, setCitySearch] = useState("");
+  const [routeSearch, setRouteSearch] = useState("");
+  const [holidaySearch, setHolidaySearch] = useState("");
+  const [messageSearch, setMessageSearch] = useState("");
+
+  const matchesSearch = (query: string, ...values: Array<string | null | undefined>) => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
+    return !normalizedQuery || values.some((value) =>
+      value?.toLocaleLowerCase("ru-RU").includes(normalizedQuery),
+    );
+  };
 
   type CredentialBroadcastProgress = {
     status: "idle" | "running" | "completed" | "interrupted";
@@ -108,6 +120,15 @@ export default function Admin() {
   const sortedUsers = [...users].sort((a, b) =>
     a.fullName.localeCompare(b.fullName, "ru", { sensitivity: "base" })
   );
+  const filteredUsers = sortedUsers.filter((user) => matchesSearch(
+    userSearch,
+    user.fullName,
+    user.email,
+    user.jobTitle,
+    user.department,
+    user.managerName,
+    users.find((manager) => manager.id === user.managerId)?.fullName,
+  ));
 
   const [newUserDialog, setNewUserDialog] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -253,6 +274,7 @@ export default function Admin() {
   const { data: cities = [], isLoading: citiesLoading } = useQuery<City[]>({
     queryKey: ["/api/cities"],
   });
+  const filteredCities = cities.filter((city) => matchesSearch(citySearch, city.name, city.region));
 
   // ============ ROUTES ============
   const { data: routes = [], isLoading: routesLoading } = useQuery<Route[]>({
@@ -262,6 +284,13 @@ export default function Admin() {
   const sortedRoutes = [...routes].sort((a, b) =>
     a.path.localeCompare(b.path, "ru", { sensitivity: "base" })
   );
+  const filteredRoutes = sortedRoutes.filter((route) => matchesSearch(
+    routeSearch,
+    route.path,
+    route.distance,
+    route.kilometers,
+    route.cities.join(" "),
+  ));
 
   // ============ HOLIDAYS ============
   const { data: dbHolidays = [] } = useQuery<Holiday[]>({
@@ -273,6 +302,13 @@ export default function Admin() {
   const [newHolidayStart, setNewHolidayStart] = useState("");
   const [newHolidayEnd, setNewHolidayEnd] = useState("");
   const [newHolidayDesc, setNewHolidayDesc] = useState("");
+  const filteredHolidays = dbHolidays
+    .filter((holiday) => {
+      if (periodStart && holiday.date < periodStart) return false;
+      if (periodEnd && holiday.date > periodEnd) return false;
+      return matchesSearch(holidaySearch, holiday.date, holiday.description);
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
 
   const createHolidayMutation = useMutation({
@@ -368,6 +404,13 @@ export default function Admin() {
   });
   const unreadCount = unreadData?.count ?? 0;
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const filteredContactMessages = contactMsgs.filter((message) => matchesSearch(
+    messageSearch,
+    message.fromUserName,
+    message.fromUserEmail,
+    message.subject,
+    message.message,
+  ));
 
   const markReadMutation = useMutation({
     mutationFn: (id: string) => apiRequest("PATCH", `/api/admin/messages/${id}/read`, {}),
@@ -1224,8 +1267,20 @@ export default function Admin() {
                   ))}
                 </div>
               ) : (
-                <StickyScrollTable>
-                  <Table>
+                <>
+                  <div className="relative mb-3 max-w-xl">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      value={userSearch}
+                      onChange={(event) => setUserSearch(event.target.value)}
+                      placeholder="Поиск по ФИО, email, отделу или руководителю"
+                      className="pl-9"
+                      data-testid="input-search-users"
+                    />
+                  </div>
+                  <StickyScrollTable>
+                    <Table>
                     <TableHeader className="sticky top-0 z-10 bg-card">
                       <TableRow>
                         <TableHead className="text-xs md:text-sm">ФИО</TableHead>
@@ -1238,7 +1293,11 @@ export default function Admin() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sortedUsers.map(u => (
+                      {filteredUsers.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                        </TableRow>
+                      ) : filteredUsers.map(u => (
                         <TableRow key={u.id}>
                           <TableCell className="text-xs md:text-sm font-medium truncate">{u.fullName}</TableCell>
                           <TableCell className="text-xs md:text-sm text-muted-foreground truncate">{u.email}</TableCell>
@@ -1293,8 +1352,9 @@ export default function Admin() {
                         </TableRow>
                       ))}
                     </TableBody>
-                  </Table>
-                </StickyScrollTable>
+                    </Table>
+                  </StickyScrollTable>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1460,8 +1520,20 @@ export default function Admin() {
                   ))}
                 </div>
               ) : (
-                <StickyScrollTable>
-                  <Table>
+                <>
+                  <div className="relative mb-3 max-w-xl">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      value={citySearch}
+                      onChange={(event) => setCitySearch(event.target.value)}
+                      placeholder="Поиск по городу или региону"
+                      className="pl-9"
+                      data-testid="input-search-cities"
+                    />
+                  </div>
+                  <StickyScrollTable>
+                    <Table>
                     <TableHeader className="sticky top-0 z-10 bg-card">
                       <TableRow>
                         <TableHead>Город</TableHead>
@@ -1470,7 +1542,11 @@ export default function Admin() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {cities.map(c => (
+                      {filteredCities.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                        </TableRow>
+                      ) : filteredCities.map(c => (
                         <TableRow key={c.id}>
                           <TableCell className="font-medium">{c.name}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{c.region || "—"}</TableCell>
@@ -1488,8 +1564,9 @@ export default function Admin() {
                         </TableRow>
                       ))}
                     </TableBody>
-                  </Table>
-                </StickyScrollTable>
+                    </Table>
+                  </StickyScrollTable>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1592,13 +1669,24 @@ export default function Admin() {
               </div>
             </CardHeader>
             <CardContent>
+              <div className="relative mb-3 max-w-xl">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={routeSearch}
+                  onChange={(event) => setRouteSearch(event.target.value)}
+                  placeholder="Поиск по маршруту, городу или расстоянию"
+                  className="pl-9"
+                  data-testid="input-search-routes"
+                />
+              </div>
               {routesLoading ? (
                 <Skeleton className="h-48 w-full" />
-              ) : routes.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">Маршруты еще не добавлены</p>
+              ) : filteredRoutes.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">{routes.length === 0 ? "Маршруты еще не добавлены" : "Ничего не найдено"}</p>
               ) : (
                 <div className="space-y-2">
-                  {sortedRoutes.map(route => (
+                  {filteredRoutes.map(route => (
                     <div key={route.id} className="flex items-center justify-between p-3 border rounded-md">
                       <div>
                         <p className="font-medium text-sm">{route.path}</p>
@@ -1705,6 +1793,17 @@ export default function Admin() {
               </div>
             </CardHeader>
             <CardContent>
+              <div className="relative mb-3 max-w-xl">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={holidaySearch}
+                  onChange={(event) => setHolidaySearch(event.target.value)}
+                  placeholder="Поиск по дате или описанию"
+                  className="pl-9"
+                  data-testid="input-search-holidays"
+                />
+              </div>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1714,14 +1813,11 @@ export default function Admin() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {dbHolidays
-                    .filter(h => {
-                      if (periodStart && h.date < periodStart) return false;
-                      if (periodEnd && h.date > periodEnd) return false;
-                      return true;
-                    })
-                    .sort((a, b) => b.date.localeCompare(a.date))
-                    .map((holiday) => (
+                  {filteredHolidays.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                    </TableRow>
+                  ) : filteredHolidays.map((holiday) => (
                       <TableRow key={holiday.id}>
                         <TableCell className="font-mono">
                           {format(new Date(holiday.date), "dd.MM.yyyy", { locale: ru })}
@@ -2030,10 +2126,21 @@ export default function Admin() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {contactMsgs.length === 0 ? (
+              <div className="relative mb-3 max-w-xl">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={messageSearch}
+                  onChange={(event) => setMessageSearch(event.target.value)}
+                  placeholder="Поиск по отправителю, email, теме или тексту"
+                  className="pl-9"
+                  data-testid="input-search-contact-messages"
+                />
+              </div>
+              {filteredContactMessages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
                   <Mail className="h-10 w-10 opacity-30" />
-                  <p>Нет сообщений</p>
+                  <p>{contactMsgs.length === 0 ? "Нет сообщений" : "Ничего не найдено"}</p>
                 </div>
               ) : (
                 <StickyScrollTable maxHeight="calc(100vh - 420px)">
@@ -2049,7 +2156,7 @@ export default function Admin() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {contactMsgs.map((msg) => (
+                      {filteredContactMessages.map((msg) => (
                         <>
                           <TableRow
                             key={msg.id}

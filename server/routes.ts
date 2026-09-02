@@ -899,7 +899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "даты командировки пересекаются датой с другой командировкой" });
       }
 
-      if (data.status === "pending") {
+      if (data.status === "pending" && currentUser.role !== "admin") {
         await assertTripPlanningWindow(data as Pick<Trip, "tripType" | "startDate" | "endDate">);
       }
 

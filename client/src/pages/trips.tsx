@@ -70,6 +70,9 @@ function isPlanningSubmissionClosed(date = new Date()) {
 
 export default function Trips() {
   const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
+  const isAdminOrDeputy = isAdmin || currentUser?.role === "deputy_ceo";
+  const defaultTripType: TripType = isAdmin || !isPlanningSubmissionClosed() ? "planned" : "unplanned";
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [periodStart, setPeriodStart] = useState<Date>();
@@ -87,9 +90,10 @@ export default function Trips() {
     purpose: "",
     trivioBookingNumber: "",
     trivioBookingUrl: "",
-    tripType: (isPlanningSubmissionClosed() ? "unplanned" : "planned") as TripType,
+    tripType: defaultTripType,
     unplannedReason: "",
   });
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [memoDialog, setMemoDialog] = useState<{ trip: TripWithDetails; kind: MemoKind } | null>(null);
   const [memoFields, setMemoFields] = useState({ reason: "", place: "", travelCost: "", accommodationCost: "", otherCost: "", newStartDate: "", newEndDate: "", newPurpose: "" });
   const [isGeneratingMemo, setIsGeneratingMemo] = useState(false);
@@ -103,8 +107,6 @@ export default function Trips() {
   };
   const { toast } = useToast();
 
-  const isAdminOrDeputy = currentUser?.role === "admin" || currentUser?.role === "deputy_ceo";
-  
   const { data: trips = [], isLoading: tripsLoading } = useQuery<TripWithDetails[]>({
     queryKey: currentUser?.department ? ["/api/trips", { department: currentUser.department }] : ["/api/trips"],
     queryFn: async () => {
@@ -244,7 +246,8 @@ export default function Trips() {
   });
 
   const resetForm = () => {
-    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", tripType: isPlanningSubmissionClosed() ? "unplanned" : "planned", unplannedReason: "" });
+    setFormData({ cityId: "", routeId: "", transportType: "car", purpose: "", trivioBookingNumber: "", trivioBookingUrl: "", tripType: defaultTripType, unplannedReason: "" });
+    setSelectedEmployeeId(currentUser?.id || "");
     setUnplannedScenario("new");
     setSourceTripId("");
     setStartDate(undefined);
@@ -270,7 +273,8 @@ export default function Trips() {
   };
 
   const handleSubmit = (status: TripStatus, force = false) => {
-    if (!currentUser || !formData.routeId || !startDate || !endDate || !formData.purpose.trim() || (formData.tripType === "unplanned" && (!formData.unplannedReason.trim() || (unplannedScenario === "reschedule" && !sourceTripId)))) {
+    const employeeId = isAdmin ? selectedEmployeeId : currentUser?.id;
+    if (!currentUser || !employeeId || !formData.routeId || !startDate || !endDate || !formData.purpose.trim() || (formData.tripType === "unplanned" && (!formData.unplannedReason.trim() || (unplannedScenario === "reschedule" && !sourceTripId)))) {
       toast({
         title: "Ошибка",
         description: "Заполните все обязательные поля, включая основание внеплановой поездки и исходную командировку при переносе",
@@ -286,7 +290,7 @@ export default function Trips() {
     }
 
     const tripData: InsertTrip = {
-      employeeId: currentUser.id,
+      employeeId,
       cityId: formData.cityId || undefined,
       routeId: formData.routeId,
       transportType: formData.transportType,
@@ -312,7 +316,7 @@ export default function Trips() {
 
   const filteredTrips = trips.filter(trip => {
     // В разделе "Мои командировки" отображаем ТОЛЬКО личные командировки пользователя
-    if (trip.employeeId !== currentUser?.id) return false;
+    if (!isAdmin && trip.employeeId !== currentUser?.id) return false;
 
     const tripStart = new Date(trip.startDate);
     const tripEnd = new Date(trip.endDate);
@@ -322,13 +326,14 @@ export default function Trips() {
 
     const matchesSearch = 
       trip.route.path.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      trip.purpose.toLowerCase().includes(searchQuery.toLowerCase());
+      trip.purpose.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (isAdmin && (trip.employee?.fullName || "").toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesStatus = statusFilter === "all" || trip.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   const sourceTrips = trips
-    .filter((trip) => trip.employeeId === currentUser?.id && trip.status !== "rejected" && trip.status !== "rescheduling")
+    .filter((trip) => trip.employeeId === (isAdmin ? selectedEmployeeId : currentUser?.id) && trip.status !== "rejected" && trip.status !== "rescheduling")
     .sort((first, second) => first.startDate.localeCompare(second.startDate));
 
   const openMemoDialog = (trip: TripWithDetails, kind: MemoKind, initialReason?: string) => {
@@ -363,7 +368,7 @@ export default function Trips() {
       purpose: trip.purpose,
       trivioBookingNumber: trip.trivioBookingNumber || "",
       trivioBookingUrl: trip.trivioBookingUrl || "",
-      tripType: isPlanningSubmissionClosed() && trip.tripType === "planned" ? "unplanned" : trip.tripType,
+      tripType: !isAdmin && isPlanningSubmissionClosed() && trip.tripType === "planned" ? "unplanned" : trip.tripType,
       unplannedReason: trip.unplannedReason || "",
     });
     setUnplannedScenario(trip.memoType === "reschedule" ? "reschedule" : "new");
@@ -423,7 +428,14 @@ export default function Trips() {
           }
         }}>
           <DialogTrigger asChild>
-            <Button className="w-full sm:w-auto" data-testid="button-add-trip">
+            <Button
+              className="w-full sm:w-auto"
+              onClick={() => {
+                resetForm();
+                setEditingTrip(null);
+              }}
+              data-testid="button-add-trip"
+            >
               <Plus className="h-4 w-4 mr-2" />
               Создать командировку
             </Button>
@@ -436,6 +448,26 @@ export default function Trips() {
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              {isAdmin && !editingTrip && (
+                <div className="grid gap-2">
+                  <Label htmlFor="trip-employee">Сотрудник *</Label>
+                  <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
+                    <SelectTrigger id="trip-employee" data-testid="select-trip-employee">
+                      <SelectValue placeholder="Выберите сотрудника" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[...users]
+                        .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru", { sensitivity: "base" }))
+                        .map((employee) => (
+                          <SelectItem key={employee.id} value={employee.id}>
+                            {employee.fullName}{employee.department ? ` - ${employee.department}` : ""}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Командировка будет создана от имени выбранного сотрудника.</p>
+                </div>
+              )}
               <div className="grid gap-2 relative">
                 <Label htmlFor="trip-route">Маршрут *</Label>
                 <div className="relative">
@@ -507,11 +539,11 @@ export default function Trips() {
                 }}>
                   <SelectTrigger id="trip-type"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {!isPlanningSubmissionClosed() && <SelectItem value="planned">Плановая</SelectItem>}
+                    {(isAdmin || !isPlanningSubmissionClosed()) && <SelectItem value="planned">Плановая</SelectItem>}
                     <SelectItem value="unplanned">Внеплановая</SelectItem>
                   </SelectContent>
                 </Select>
-                {isPlanningSubmissionClosed() && (
+                {!isAdmin && isPlanningSubmissionClosed() && (
                   <p className="text-xs leading-5 text-muted-foreground">
                     Прием плановых поездок на следующий месяц завершен 25-го числа. Новые поездки оформляются как внеплановые.
                   </p>
@@ -626,7 +658,7 @@ export default function Trips() {
                         locale={ru}
                         modifiers={nonWorkingDayModifiers}
                         modifiersClassNames={nonWorkingDayClassNames}
-                        disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                        disabled={isAdmin ? undefined : (date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                       />
                     </PopoverContent>
                   </Popover>
@@ -657,11 +689,10 @@ export default function Trips() {
                         modifiers={nonWorkingDayModifiers}
                         modifiersClassNames={nonWorkingDayClassNames}
                         disabled={(date) => {
-                          const today = new Date(new Date().setHours(0, 0, 0, 0));
                           if (startDate) {
                             return date < startDate;
                           }
-                          return date < today;
+                          return !isAdmin && date < new Date(new Date().setHours(0, 0, 0, 0));
                         }}
                       />
                     </PopoverContent>

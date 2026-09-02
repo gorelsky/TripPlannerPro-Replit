@@ -1290,7 +1290,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
     );
     
-    const validTrips = tripsInPeriod.filter(t => t !== null);
+    const validTrips = tripsInPeriod
+      .filter((trip) => trip !== null)
+      .sort((first, second) => {
+        const employeeOrder = (first!.employee?.fullName || "").localeCompare(second!.employee?.fullName || "", "ru", { sensitivity: "base" });
+        if (employeeOrder !== 0) return employeeOrder;
+        const startDateOrder = first!.startDate.localeCompare(second!.startDate);
+        return startDateOrder !== 0 ? startDateOrder : first!.endDate.localeCompare(second!.endDate);
+      });
     
     // Split into two groups
     const withAllowance = validTrips.filter(t => t!.totalAllowance > 0);
@@ -1304,8 +1311,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       periodStart,
       periodEnd,
       amountPerNight,
-      withAllowance: withAllowance.map((t, idx) => ({ ...t, number: idx + 1 })),
-      withoutAllowance: withoutAllowance.map((t, idx) => ({ ...t, number: withAllowance.length + idx + 1 })),
+      withAllowance: withAllowance.map((trip, index) => ({ ...trip, number: index + 1 })),
+      withoutAllowance: withoutAllowance.map((trip, index) => ({ ...trip, number: withAllowance.length + index + 1 })),
       totalWithAllowance,
       totalWithoutAllowance,
       grandTotal,
@@ -1344,7 +1351,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `Реестр командировок за период с ${formatReportDate(period.startDate)} по ${formatReportDate(period.endDate)}`,
       ]);
       titleRow.font = { bold: true, size: 14 };
-      worksheet.mergeCells("A1:H1");
+      worksheet.mergeCells("A1:I1");
       
       // Empty row
       worksheet.addRow([]);
@@ -1356,6 +1363,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Отдел",
         "Срок командировки",
         "Город проживания - Город командировки - Город проживания",
+        "Вид командировки",
         "Транспорт",
         "Суточных дней",
         "Итог суточные, руб.",
@@ -1383,6 +1391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.department || "-",
             tripDates,
             routePath,
+            trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
             trip.totalAllowance,
@@ -1390,7 +1399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Subtotal for with allowance
-        const subtotalWithRow = worksheet.addRow(["", "", "", "", "", "", "Итого по суточным:", data.totalWithAllowance]);
+        const subtotalWithRow = worksheet.addRow(["", "", "", "", "", "", "", "Итого по суточным:", data.totalWithAllowance]);
         subtotalWithRow.font = { bold: true };
         subtotalWithRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
       }
@@ -1416,6 +1425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.department || "-",
             tripDates,
             routePath,
+            trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
             trip.totalAllowance || 0,
@@ -1423,7 +1433,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Subtotal for without allowance
-        const subtotalWithoutRow = worksheet.addRow(["", "", "", "", "", "", "Итого по без суточных:", data.totalWithoutAllowance]);
+        const subtotalWithoutRow = worksheet.addRow(["", "", "", "", "", "", "", "Итого по без суточных:", data.totalWithoutAllowance]);
         subtotalWithoutRow.font = { bold: true };
         subtotalWithoutRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
       }
@@ -1433,7 +1443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Grand total
       if ((data.withAllowance && data.withAllowance.length > 0) || (data.withoutAllowance && data.withoutAllowance.length > 0)) {
-        const grandTotalRow = worksheet.addRow(["", "", "", "", "", "", "ОБЩИЙ ИТОГ:", data.grandTotal]);
+        const grandTotalRow = worksheet.addRow(["", "", "", "", "", "", "", "ОБЩИЙ ИТОГ:", data.grandTotal]);
         grandTotalRow.font = { bold: true, size: 12 };
         grandTotalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
       }
@@ -1445,6 +1455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { width: 15 },
         { width: 25 },
         { width: 45 },
+        { width: 16 },
         { width: 12 },
         { width: 8 },
         { width: 15 },
@@ -2295,7 +2306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `Реестр командировок за период с ${formatReportDate(period.startDate)} по ${formatReportDate(period.endDate)}`,
       ]);
       titleRow.font = { bold: true, size: 14 };
-      worksheet.mergeCells("A1:H1");
+      worksheet.mergeCells("A1:I1");
       
       // Empty row
       worksheet.addRow([]);
@@ -2307,6 +2318,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Отдел",
         "Срок командировки",
         "Город проживания - Город командировки - Город проживания",
+        "Вид командировки",
         "Транспорт",
         "Суточных дней",
         "Итог суточные, руб.",
@@ -2334,6 +2346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.department || "-",
             tripDates,
             routePath,
+            trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
             trip.totalAllowance,
@@ -2341,7 +2354,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Subtotal for with allowance
-        const subtotalWithRow = worksheet.addRow(["", "", "", "", "", "", "Итого по суточным:", data.totalWithAllowance]);
+        const subtotalWithRow = worksheet.addRow(["", "", "", "", "", "", "", "Итого по суточным:", data.totalWithAllowance]);
         subtotalWithRow.font = { bold: true };
         subtotalWithRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
       }
@@ -2367,6 +2380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.department || "-",
             tripDates,
             routePath,
+            trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
             trip.totalAllowance || 0,
@@ -2374,7 +2388,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Subtotal for without allowance
-        const subtotalWithoutRow = worksheet.addRow(["", "", "", "", "", "", "Итого по без суточных:", data.totalWithoutAllowance]);
+        const subtotalWithoutRow = worksheet.addRow(["", "", "", "", "", "", "", "Итого по без суточных:", data.totalWithoutAllowance]);
         subtotalWithoutRow.font = { bold: true };
         subtotalWithoutRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F5F5" } };
       }
@@ -2384,7 +2398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Grand total
       if ((data.withAllowance && data.withAllowance.length > 0) || (data.withoutAllowance && data.withoutAllowance.length > 0)) {
-        const grandTotalRow = worksheet.addRow(["", "", "", "", "", "", "ОБЩИЙ ИТОГ:", data.grandTotal]);
+        const grandTotalRow = worksheet.addRow(["", "", "", "", "", "", "", "ОБЩИЙ ИТОГ:", data.grandTotal]);
         grandTotalRow.font = { bold: true, size: 12 };
         grandTotalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
       }
@@ -2396,6 +2410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { width: 15 },
         { width: 25 },
         { width: 45 },
+        { width: 16 },
         { width: 12 },
         { width: 8 },
         { width: 15 },

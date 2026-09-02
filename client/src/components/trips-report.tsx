@@ -52,6 +52,7 @@ export function TripsReport() {
       trip.employee?.fullName,
       trip.employee?.department,
       trip.route?.path,
+      trip.tripType === "planned" ? "плановая" : "внеплановая",
       trip.transportType,
       trip.startDate,
       trip.endDate,
@@ -202,6 +203,7 @@ export function TripsReport() {
                         <TableHead>Отдел</TableHead>
                         <TableHead>Срок</TableHead>
                         <TableHead>Маршрут</TableHead>
+                        <TableHead>Вид</TableHead>
                         <TableHead>Транспорт</TableHead>
                         <TableHead className="text-right">Суточных дней</TableHead>
                         <TableHead className="text-right">Итог, руб.</TableHead>
@@ -210,7 +212,7 @@ export function TripsReport() {
                     <TableBody>
                       {visibleWithAllowance.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                          <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
                         </TableRow>
                       ) : visibleWithAllowance.map((trip) => {
                         const startDate = new Date(trip.startDate);
@@ -232,6 +234,7 @@ export function TripsReport() {
                             </TableCell>
                             <TableCell className="text-sm">{tripDates}</TableCell>
                             <TableCell className="text-sm">{routePath}</TableCell>
+                            <TableCell><Badge variant={trip.tripType === "planned" ? "default" : "outline"}>{trip.tripType === "planned" ? "Плановая" : "Внеплановая"}</Badge></TableCell>
                             <TableCell className="text-sm">{transportMap[trip.transportType] || trip.transportType}</TableCell>
                             <TableCell className="text-right">{trip.allowanceDays}</TableCell>
                             <TableCell className="text-right font-semibold">{trip.totalAllowance.toLocaleString("ru-RU")}</TableCell>
@@ -240,7 +243,7 @@ export function TripsReport() {
                       })}
                       {visibleWithAllowance.length > 0 && (
                         <TableRow className="border-t-2 font-bold">
-                          <TableCell colSpan={7} className="text-right">Итого по найденным:</TableCell>
+                          <TableCell colSpan={8} className="text-right">Итого по найденным:</TableCell>
                           <TableCell className="text-right">{visibleWithAllowance.reduce((total, trip) => total + trip.totalAllowance, 0).toLocaleString("ru-RU")} ₽</TableCell>
                         </TableRow>
                       )}
@@ -272,6 +275,7 @@ export function TripsReport() {
                         <TableHead>Отдел</TableHead>
                         <TableHead>Срок</TableHead>
                         <TableHead>Маршрут</TableHead>
+                        <TableHead>Вид</TableHead>
                         <TableHead>Транспорт</TableHead>
                         <TableHead className="text-right">Суточных дней</TableHead>
                         <TableHead className="text-right">Итог, руб.</TableHead>
@@ -280,7 +284,7 @@ export function TripsReport() {
                     <TableBody>
                       {visibleWithoutAllowance.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                          <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
                         </TableRow>
                       ) : visibleWithoutAllowance.map((trip) => {
                         const startDate = new Date(trip.startDate);
@@ -302,6 +306,7 @@ export function TripsReport() {
                             </TableCell>
                             <TableCell className="text-sm">{tripDates}</TableCell>
                             <TableCell className="text-sm">{routePath}</TableCell>
+                            <TableCell><Badge variant={trip.tripType === "planned" ? "default" : "outline"}>{trip.tripType === "planned" ? "Плановая" : "Внеплановая"}</Badge></TableCell>
                             <TableCell className="text-sm">{transportMap[trip.transportType] || trip.transportType}</TableCell>
                             <TableCell className="text-right">{trip.allowanceDays}</TableCell>
                             <TableCell className="text-right font-semibold">0</TableCell>
@@ -310,7 +315,7 @@ export function TripsReport() {
                       })}
                       {visibleWithoutAllowance.length > 0 && (
                         <TableRow className="border-t-2 font-bold">
-                          <TableCell colSpan={7} className="text-right">Итого по найденным:</TableCell>
+                          <TableCell colSpan={8} className="text-right">Итого по найденным:</TableCell>
                           <TableCell className="text-right">0 ₽</TableCell>
                         </TableRow>
                       )}

@@ -50,6 +50,7 @@ export const users = pgTable("trip_planner_users", {
   managerId: varchar("manager_id"), // ID руководителя отдела
   managerName: text("manager_name"), // ФИО руководителя из Excel (как есть, без изменений)
   department: text("department"), // Отдел - КЛЮЧЕВОЙ ФИЛЬТР для видимости коллег
+  homeCityId: varchar("home_city_id"), // Город проживания из справочника городов
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

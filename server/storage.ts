@@ -418,6 +418,7 @@ export class PostgresStorage implements IStorage {
       managerId: user.managerId ?? null,
       managerName: user.managerName ?? null,
       department: user.department ?? null,
+      homeCityId: user.homeCityId ?? null,
       createdAt: new Date(),
     };
 
@@ -478,6 +479,7 @@ export class PostgresStorage implements IStorage {
       managerId: user.managerId ?? null,
       managerName: user.managerName ?? null,
       department: user.department ?? null,
+      homeCityId: user.homeCityId ?? null,
       createdAt: new Date(),
     };
 
@@ -495,6 +497,7 @@ export class PostgresStorage implements IStorage {
           managerId: user.managerId || null,
           managerName: user.managerName || null,
           department: user.department || null,
+          homeCityId: user.homeCityId || null,
           password: hashedPassword,
         },
       })

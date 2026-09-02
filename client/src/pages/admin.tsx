@@ -137,6 +137,7 @@ export default function Admin() {
     role: null as UserRole | null,
     managerId: null as string | null,
     department: "",
+    homeCityId: null as string | null,
     userType: "employee" as "employee" | "manager",
   });
 
@@ -155,7 +156,7 @@ export default function Admin() {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       setNewUserDialog(false);
       setGeneratedPassword({ userId: response.user.id, password: response.password });
-      setNewUser({ fullName: "", email: "", role: null, managerId: null, department: "", userType: "employee" });
+      setNewUser({ fullName: "", email: "", role: null, managerId: null, department: "", homeCityId: null, userType: "employee" });
     },
     onError: () => {
       toast({
@@ -246,6 +247,7 @@ export default function Admin() {
         department: editingUser.department,
         userType: editingUser.userType,
         managerId: editingUser.managerId ?? undefined,
+        homeCityId: editingUser.homeCityId ?? undefined,
       } 
     });
   };
@@ -266,6 +268,7 @@ export default function Admin() {
         userType: manualEditingUser.userType,
         managerId: manualEditingUser.managerId ?? undefined,
         role: manualEditingUser.role ?? undefined,
+        homeCityId: manualEditingUser.homeCityId ?? undefined,
       },
     });
   };
@@ -1022,6 +1025,18 @@ export default function Admin() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="grid gap-2">
+                    <Label>Город проживания</Label>
+                    <Select value={editingUser.homeCityId || "none"} onValueChange={(id) => setEditingUser({ ...editingUser, homeCityId: id === "none" ? null : id })}>
+                      <SelectTrigger><SelectValue placeholder="Не выбран" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Не выбран</SelectItem>
+                        {[...cities].sort((first, second) => first.name.localeCompare(second.name, "ru")).map((city) => (
+                          <SelectItem key={city.id} value={city.id}>{city.name}{city.region ? ` - ${city.region}` : ""}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
               <DialogFooter>
@@ -1100,6 +1115,18 @@ export default function Admin() {
                               {u.fullName}
                             </SelectItem>
                           ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Город проживания</Label>
+                    <Select value={manualEditingUser.homeCityId || "none"} onValueChange={(id) => setManualEditingUser({ ...manualEditingUser, homeCityId: id === "none" ? null : id })}>
+                      <SelectTrigger><SelectValue placeholder="Не выбран" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Не выбран</SelectItem>
+                        {[...cities].sort((first, second) => first.name.localeCompare(second.name, "ru")).map((city) => (
+                          <SelectItem key={city.id} value={city.id}>{city.name}{city.region ? ` - ${city.region}` : ""}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1243,6 +1270,18 @@ export default function Admin() {
                                   {u.fullName}
                                 </SelectItem>
                               ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Город проживания</Label>
+                        <Select value={newUser.homeCityId || "none"} onValueChange={(id) => setNewUser({ ...newUser, homeCityId: id === "none" ? null : id })}>
+                          <SelectTrigger><SelectValue placeholder="Не выбран" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Не выбран</SelectItem>
+                            {[...cities].sort((first, second) => first.name.localeCompare(second.name, "ru")).map((city) => (
+                              <SelectItem key={city.id} value={city.id}>{city.name}{city.region ? ` - ${city.region}` : ""}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>

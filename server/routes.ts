@@ -1274,6 +1274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       approvedTrips.map(async (trip) => {
           const details = await storage.getTripWithDetails(trip.id);
           if (!details) return null;
+          const homeCity = details.employee.homeCityId ? await storage.getCity(details.employee.homeCityId) : undefined;
           
           const startDate = new Date(`${trip.startDate}T00:00:00`);
           const endDate = new Date(`${trip.endDate}T00:00:00`);
@@ -1283,6 +1284,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           return {
             ...details,
+            homeCityName: homeCity?.name || "",
             days,
             allowanceDays,
             totalAllowance,
@@ -1383,6 +1385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const endDate = new Date(trip.endDate);
           const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
           const routePath = trip.route?.path || "-";
+          const itinerary = trip.homeCityName ? `${trip.homeCityName} - ${routePath} - ${trip.homeCityName}` : routePath;
           const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
 
           worksheet.addRow([
@@ -1390,7 +1393,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.fullName || "-",
             trip.employee?.department || "-",
             tripDates,
-            routePath,
+            itinerary,
             trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
@@ -1417,6 +1420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const endDate = new Date(trip.endDate);
           const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
           const routePath = trip.route?.path || "-";
+          const itinerary = trip.homeCityName ? `${trip.homeCityName} - ${routePath} - ${trip.homeCityName}` : routePath;
           const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
 
           worksheet.addRow([
@@ -1424,7 +1428,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.fullName || "-",
             trip.employee?.department || "-",
             tripDates,
-            routePath,
+            itinerary,
             trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
@@ -2338,6 +2342,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const endDate = new Date(trip.endDate);
           const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
           const routePath = trip.route?.path || "-";
+          const itinerary = trip.homeCityName ? `${trip.homeCityName} - ${routePath} - ${trip.homeCityName}` : routePath;
           const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
 
           worksheet.addRow([
@@ -2345,7 +2350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.fullName || "-",
             trip.employee?.department || "-",
             tripDates,
-            routePath,
+            itinerary,
             trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,
@@ -2372,6 +2377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const endDate = new Date(trip.endDate);
           const tripDates = `${startDate.getDate().toString().padStart(2, "0")}.${(startDate.getMonth() + 1).toString().padStart(2, "0")}.${startDate.getFullYear()} - ${endDate.getDate().toString().padStart(2, "0")}.${(endDate.getMonth() + 1).toString().padStart(2, "0")}.${endDate.getFullYear()}`;
           const routePath = trip.route?.path || "-";
+          const itinerary = trip.homeCityName ? `${trip.homeCityName} - ${routePath} - ${trip.homeCityName}` : routePath;
           const transportMap: Record<string, string> = { plane: "Самолет", train: "Поезд", car: "Автомобиль" };
 
           worksheet.addRow([
@@ -2379,7 +2385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trip.employee?.fullName || "-",
             trip.employee?.department || "-",
             tripDates,
-            routePath,
+            itinerary,
             trip.tripType === "planned" ? "Плановая" : "Внеплановая",
             transportMap[trip.transportType] || trip.transportType,
             trip.allowanceDays,

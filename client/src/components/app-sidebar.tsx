@@ -129,7 +129,7 @@ export function AppSidebar() {
       return user && ["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user.role || "");
     }
     if (item.url === "/registry") {
-      return user?.role === "accountant";
+      return user && ["accountant", "hr_manager"].includes(user.role || "");
     }
     return true;
   });

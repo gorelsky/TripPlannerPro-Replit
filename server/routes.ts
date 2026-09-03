@@ -2615,7 +2615,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const user = await storage.getUser(req.session.userId);
-      if (!user || !["admin", "coordinator", "accountant"].includes(user.role || "")) {
+      if (!user || !["admin", "coordinator", "accountant", "hr_manager"].includes(user.role || "")) {
         return res.status(403).json({ error: "Registry is available only to administrators, coordinators and accounting" });
       }
       next();

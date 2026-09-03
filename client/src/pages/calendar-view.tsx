@@ -78,7 +78,7 @@ export default function CalendarView() {
 
   const filteredEmployees = employees.filter(emp => {
     if (!currentUser) return false;
-    if (["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(currentUser.role || "")) return true;
+    if (["admin", "coordinator", "accountant", "hr_director", "ceo", "deputy_ceo"].includes(currentUser.role || "")) return true;
     return emp.id === currentUser.id || emp.managerId === currentUser.id;
   });
 
@@ -125,8 +125,14 @@ export default function CalendarView() {
     pending: "bg-amber-500",
     manager_approved: "bg-blue-400",
     director_approved: "bg-blue-600",
+    coordinator_review: "bg-violet-600",
+    deputy_review: "bg-indigo-600",
+    ceo_review: "bg-sky-700",
+    awaiting_ceo_signature: "bg-cyan-700",
+    planned: "bg-emerald-600",
     approved: "bg-green-500",
     rejected: "bg-red-500",
+    rescheduling: "bg-sky-500",
   } as Record<string, string>)[status] || "bg-muted";
 
   const tripLabel = (trip: TripWithDetails) => {

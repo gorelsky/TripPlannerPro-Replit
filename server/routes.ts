@@ -279,7 +279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   const elevatedTripViewerRoles = new Set(["admin", "ceo", "deputy_ceo"]);
-  const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant"]);
+  const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator", "accountant", "hr_director"]);
   const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director"]);
   const requiredWorkflowRoles = new Set(["coordinator", "deputy_ceo", "ceo"]);
   const defaultWorkflowDeputyCeoName = "Горельский Евгений Александрович";
@@ -602,7 +602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const role = currentUser.role;
       const utype = currentUser.userType;
 
-      if (role === "admin" || role === "ceo" || role === "coordinator" || role === "accountant") {
+      if (role === "admin" || role === "ceo" || role === "coordinator" || role === "accountant" || role === "hr_director") {
         // Full visibility
         users = await storage.getAllUsers();
 
@@ -1673,7 +1673,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const role = currentUser.role;
       const utype = currentUser.userType;
 
-      if (role === "admin" || role === "ceo" || role === "coordinator" || role === "accountant") {
+      if (role === "admin" || role === "ceo" || role === "coordinator" || role === "accountant" || role === "hr_director") {
         // Full visibility
         users = await storage.getAllUsers();
 
@@ -2615,7 +2615,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const user = await storage.getUser(req.session.userId);
-      if (!user || !["admin", "coordinator", "accountant", "hr_manager"].includes(user.role || "")) {
+      if (!user || !["admin", "coordinator", "accountant", "hr_manager", "hr_director"].includes(user.role || "")) {
         return res.status(403).json({ error: "Registry is available only to administrators, coordinators and accounting" });
       }
       next();
@@ -2628,7 +2628,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const user = await storage.getUser(req.session.userId);
-      if (!user || !["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user.role || "")) {
+      if (!user || !["admin", "coordinator", "accountant", "hr_director", "ceo", "deputy_ceo"].includes(user.role || "")) {
         return res.status(403).json({ error: "Analytics is available only to management" });
       }
       next();

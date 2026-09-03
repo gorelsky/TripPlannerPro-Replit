@@ -60,7 +60,7 @@ export default function Dashboard() {
   const isManager = user && user.role && ["territorial_manager", "commercial_manager", "marketing_director", "sales_director", "commerce_director", "admin", "ceo", "deputy_ceo", "coordinator"].includes(user.role);
   const isCoordinator = user?.role === "coordinator";
   const isAccountant = user?.role === "accountant";
-  const canViewAllTrips = user?.role && ["admin", "ceo", "deputy_ceo", "coordinator", "accountant"].includes(user.role);
+  const canViewAllTrips = user?.role && ["admin", "ceo", "deputy_ceo", "coordinator", "accountant", "hr_director"].includes(user.role);
 
   // Separate query for trips pending approval — uses server-side logic that correctly handles hierarchy
   const { data: approvalTripsData, isLoading: approvalTripsLoading } = useQuery<TripWithDetails[]>({

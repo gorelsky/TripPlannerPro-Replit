@@ -123,13 +123,13 @@ export function AppSidebar() {
   const filteredMenuItems = menuItems.filter(item => {
     if (item.url === "/approvals") {
       // Раздел доступен всем руководителям, в том числе импортированным с общей ролью manager.
-      return user?.userType === "manager";
+      return user?.userType === "manager" && user.role !== "hr_director";
     }
     if (item.url === "/analytics") {
-      return user && ["admin", "coordinator", "accountant", "ceo", "deputy_ceo"].includes(user.role || "");
+      return user && ["admin", "coordinator", "accountant", "hr_director", "ceo", "deputy_ceo"].includes(user.role || "");
     }
     if (item.url === "/registry") {
-      return user && ["accountant", "hr_manager"].includes(user.role || "");
+      return user && ["accountant", "hr_manager", "hr_director"].includes(user.role || "");
     }
     return true;
   });

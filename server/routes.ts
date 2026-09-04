@@ -2834,7 +2834,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Trip not found" });
       }
 
-      const canGenerate = currentUser.role === "admin" || currentUser.id === trip.employeeId || currentUser.id === trip.employee.managerId;
+      const canGenerate = currentUser.role === "admin" || currentUser.role === "coordinator" || currentUser.id === trip.employeeId || currentUser.id === trip.employee.managerId;
       if (!canGenerate) {
         return res.status(403).json({ error: "You do not have access to this trip" });
       }

@@ -71,7 +71,9 @@ function isPlanningSubmissionClosed(date = new Date()) {
 export default function Trips() {
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === "admin";
+  const isCoordinator = currentUser?.role === "coordinator";
   const isAdminOrDeputy = isAdmin || currentUser?.role === "deputy_ceo";
+  const canViewAllTrips = isAdmin || isCoordinator;
   const defaultTripType: TripType = isAdmin || !isPlanningSubmissionClosed() ? "planned" : "unplanned";
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -112,7 +114,7 @@ export default function Trips() {
   const { data: trips = [], isLoading: tripsLoading } = useQuery<TripWithDetails[]>({
     queryKey: currentUser?.department ? ["/api/trips", { department: currentUser.department }] : ["/api/trips"],
     queryFn: async () => {
-      const url = isAdminOrDeputy 
+      const url = isAdminOrDeputy || isCoordinator
         ? "/api/trips" 
         : `/api/trips?department=${encodeURIComponent(currentUser?.department || "")}`;
       const res = await fetch(url);
@@ -323,8 +325,8 @@ export default function Trips() {
   };
 
   const filteredTrips = trips.filter(trip => {
-    // В разделе "Мои командировки" отображаем ТОЛЬКО личные командировки пользователя
-    if (!isAdmin && trip.employeeId !== currentUser?.id) return false;
+    // Координатор просматривает все поездки, остальные пользователи — только свои.
+    if (!canViewAllTrips && trip.employeeId !== currentUser?.id) return false;
 
     const tripStart = new Date(trip.startDate);
     const tripEnd = new Date(trip.endDate);
@@ -426,9 +428,13 @@ export default function Trips() {
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold text-foreground sm:text-2xl">Мои командировки</h1>
+          <h1 className="text-xl font-semibold text-foreground sm:text-2xl">
+            {isCoordinator ? "Командировки сотрудников" : "Мои командировки"}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Управление вашими командировками
+            {isCoordinator
+              ? "Просмотр командировок сотрудников и служебных записок"
+              : "Управление вашими командировками"}
           </p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={(open) => {
@@ -438,7 +444,7 @@ export default function Trips() {
             setEditingTrip(null);
           }
         }}>
-          <DialogTrigger asChild>
+          {!isCoordinator && <DialogTrigger asChild>
             <Button
               className="w-full sm:w-auto"
               onClick={() => {
@@ -450,7 +456,7 @@ export default function Trips() {
               <Plus className="h-4 w-4 mr-2" />
               Создать командировку
             </Button>
-          </DialogTrigger>
+          </DialogTrigger>}
           <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto p-4 sm:max-h-[calc(100dvh-3rem)] sm:p-6">
             <DialogHeader>
               <DialogTitle>{editingTrip ? (isAdmin ? "Редактировать командировку" : "Редактировать черновик") : "Создать командировку"}</DialogTitle>
@@ -1017,6 +1023,7 @@ export default function Trips() {
                               </DropdownMenuContent>
                             </DropdownMenu>
                     }
+                    {!isCoordinator && <>
                     {(isAdmin || trip.status === "draft") ? (
                       <Button
                         variant="outline"
@@ -1058,6 +1065,7 @@ export default function Trips() {
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
+                    </>}
                           </div>
                         </TableCell>
                       </TableRow>

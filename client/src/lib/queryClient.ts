@@ -63,8 +63,10 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
-      refetchInterval: false,
-      refetchOnWindowFocus: false,
+      // Обновляем открытые разделы без перезагрузки страницы: новые поездки,
+      // согласования и уведомления появляются автоматически.
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: true,
       staleTime: Infinity,
       retry: false,
     },

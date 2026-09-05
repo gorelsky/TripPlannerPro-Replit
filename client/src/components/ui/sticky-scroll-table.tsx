@@ -61,7 +61,7 @@ export function StickyScrollTable({
     <div className={cn("overflow-hidden rounded-md border", className)}>
       <div
         ref={contentRef}
-        className="overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]"
+        className="overflow-x-hidden overflow-y-scroll overscroll-contain [scrollbar-gutter:stable]"
         style={{ maxHeight }}
       >
         {children}

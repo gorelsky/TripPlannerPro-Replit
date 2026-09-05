@@ -328,6 +328,7 @@ export default function Approvals() {
               </div>
             </div>
           ) : (
+            <div className="max-h-[calc(100dvh-360px)] overflow-y-auto overscroll-contain pr-2 [scrollbar-gutter:stable]">
             <Accordion type="single" collapsible className="w-full">
               {filteredTrips.map((trip) => (
                   <AccordionItem key={trip.id} value={trip.id} className="mb-2 rounded-md border px-3 sm:px-4">
@@ -453,6 +454,7 @@ export default function Approvals() {
                 </AccordionItem>
               ))}
             </Accordion>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -376,14 +376,14 @@ export default function CalendarView() {
           )}
 
           <Dialog open={isDayDetailsOpen} onOpenChange={setIsDayDetailsOpen}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-md overflow-hidden">
               <DialogHeader>
                 <DialogTitle>
                   Командировки на {selectedDay && format(selectedDay, "d MMMM yyyy", { locale: ru })}
                 </DialogTitle>
                 <DialogDescription>Детальная информация о запланированных поездках</DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
+              <div className="max-h-[calc(100dvh-12rem)] space-y-4 overflow-y-auto overscroll-contain py-4 pr-2 [scrollbar-gutter:stable]">
                 {selectedDay && getTripsForDate(selectedDay).length === 0 ? (
                   <p className="text-sm text-center text-muted-foreground py-4">Нет командировок на этот день</p>
                 ) : (

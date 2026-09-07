@@ -115,14 +115,15 @@ export interface IStorage {
 
 export class PostgresStorage implements IStorage {
   private initialized = false;
+  private initializationReady: Promise<void>;
   private chatTableReady?: Promise<void>;
   private tripBookingColumnsReady?: Promise<void>;
   private tripTypeColumnsReady?: Promise<void>;
   private tripMemoColumnsReady?: Promise<void>;
+  private employmentStatusColumnReady?: Promise<void>;
 
   constructor() {
-    this.initializeSampleData();
-    this.fixInvalidRoles();
+    this.initializationReady = this.initializeSampleData().then(() => this.fixInvalidRoles());
   }
 
   private generatePassword(): string {
@@ -200,6 +201,16 @@ export class PostgresStorage implements IStorage {
       `).then(() => undefined);
     }
     return this.tripMemoColumnsReady;
+  }
+
+  private ensureEmploymentStatusColumn(): Promise<void> {
+    if (!this.employmentStatusColumnReady) {
+      this.employmentStatusColumnReady = db.execute(sql`
+        ALTER TABLE trip_planner_users
+          ADD COLUMN IF NOT EXISTS employment_status text NOT NULL DEFAULT 'active'
+      `).then(() => undefined);
+    }
+    return this.employmentStatusColumnReady;
   }
 
   private determineRoleFromJobTitle(jobTitle: string | undefined | null): string | null {
@@ -322,6 +333,7 @@ export class PostgresStorage implements IStorage {
       await this.ensureTripBookingColumns();
       await this.ensureTripTypeColumns();
       await this.ensureTripMemoColumns();
+      await this.ensureEmploymentStatusColumn();
 
       // Create cities if not exist
       const citiesCount = await db.select().from(cities);
@@ -374,32 +386,39 @@ export class PostgresStorage implements IStorage {
 
   // Users
   async getUser(id: string): Promise<User | undefined> {
+    await this.initializationReady;
     const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
     return result[0];
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
+    await this.initializationReady;
     const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
     return result[0];
   }
 
   async getAllUsers(): Promise<User[]> {
+    await this.initializationReady;
     return this.sortUsersByFullName(await db.select().from(users));
   }
 
   async getUsersByRole(role: string): Promise<User[]> {
+    await this.initializationReady;
     return this.sortUsersByFullName(await db.select().from(users).where(eq(users.role, role as any)));
   }
 
   async getUsersByManager(managerId: string): Promise<User[]> {
+    await this.initializationReady;
     return this.sortUsersByFullName(await db.select().from(users).where(eq(users.managerId, managerId)));
   }
 
   async getUsersByDepartment(department: string): Promise<User[]> {
+    await this.initializationReady;
     return this.sortUsersByFullName(await db.select().from(users).where(eq(users.department, department)));
   }
 
   async createUser(user: InsertUser): Promise<{ user: User; password: string }> {
+    await this.initializationReady;
     const id = randomUUID();
     const password = this.generatePassword();
     const hashedPassword = this.hashPassword(password);
@@ -419,6 +438,7 @@ export class PostgresStorage implements IStorage {
       managerName: user.managerName ?? null,
       department: user.department ?? null,
       homeCityId: user.homeCityId ?? null,
+      employmentStatus: (user.employmentStatus ?? "active") as User["employmentStatus"],
       createdAt: new Date(),
     };
 
@@ -427,6 +447,7 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
+    await this.initializationReady;
     const updateData: any = { ...user };
     if (updateData.password) {
       updateData.password = this.hashPassword(updateData.password);
@@ -437,10 +458,12 @@ export class PostgresStorage implements IStorage {
   }
 
   async restoreUserPasswordHash(id: string, passwordHash: string): Promise<void> {
+    await this.initializationReady;
     await db.update(users).set({ password: passwordHash }).where(eq(users.id, id));
   }
 
   async deleteUser(id: string): Promise<boolean> {
+    await this.initializationReady;
     await db.delete(users).where(eq(users.id, id));
     return true;
   }
@@ -456,11 +479,13 @@ export class PostgresStorage implements IStorage {
   }
 
   async clearNonAdminUsers(): Promise<void> {
+    await this.initializationReady;
     await db.delete(users).where(ne(users.role, "admin" as any));
     console.log("[STORAGE] Cleared all non-admin users");
   }
 
   async upsertUser(user: InsertUser): Promise<{ user: User; password: string }> {
+    await this.initializationReady;
     const id = randomUUID();
     const password = this.generatePassword();
     const hashedPassword = this.hashPassword(password);
@@ -480,26 +505,32 @@ export class PostgresStorage implements IStorage {
       managerName: user.managerName ?? null,
       department: user.department ?? null,
       homeCityId: user.homeCityId ?? null,
+      employmentStatus: (user.employmentStatus ?? "active") as User["employmentStatus"],
       createdAt: new Date(),
     };
 
     // Use Drizzle UPSERT to handle duplicates
+    const updateData: Record<string, unknown> = {
+      fullName: user.fullName,
+      role: role as any,
+      jobTitle: user.jobTitle,
+      userType: user.userType,
+      managerId: user.managerId || null,
+      managerName: user.managerName || null,
+      department: user.department || null,
+      homeCityId: user.homeCityId || null,
+      password: hashedPassword,
+    };
+    if (user.employmentStatus) {
+      updateData.employmentStatus = user.employmentStatus as User["employmentStatus"];
+    }
+
     const result = await db
       .insert(users)
       .values(newUser as any)
       .onConflictDoUpdate({
         target: users.email,
-        set: {
-          fullName: user.fullName,
-          role: role as any,
-          jobTitle: user.jobTitle,
-          userType: user.userType,
-          managerId: user.managerId || null,
-          managerName: user.managerName || null,
-          department: user.department || null,
-          homeCityId: user.homeCityId || null,
-          password: hashedPassword,
-        },
+        set: updateData as any,
       })
       .returning();
 

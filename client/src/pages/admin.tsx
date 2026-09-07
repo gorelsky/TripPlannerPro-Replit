@@ -55,7 +55,7 @@ import { ru } from "date-fns/locale";
 import { roleLabels, roleShortLabels, determineRoleFromJobTitle } from "@/lib/role-utils";
 import { TripsReport } from "@/components/trips-report";
 import { scrollAppToTop } from "@/lib/scroll-utils";
-import type { User, City, UserRole, InsertUser, InsertCity, Route, DailyAllowance, Holiday, InsertHoliday, ContactMessage } from "@shared/schema";
+import type { User, City, UserRole, EmploymentStatus, InsertUser, InsertCity, Route, DailyAllowance, Holiday, InsertHoliday, ContactMessage } from "@shared/schema";
 
 export default function Admin() {
   const { user, logout, switchUser } = useAuth();
@@ -114,7 +114,11 @@ export default function Admin() {
 
   // ============ USERS ============
   const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
-    queryKey: ["/api/users"],
+    queryKey: ["/api/users", { includeInactive: true }],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/users?includeInactive=true");
+      return response.json();
+    },
   });
 
   const sortedUsers = [...users].sort((a, b) =>
@@ -138,6 +142,7 @@ export default function Admin() {
     managerId: null as string | null,
     department: "",
     homeCityId: null as string | null,
+    employmentStatus: "active" as EmploymentStatus,
     userType: "employee" as "employee" | "manager",
   });
 
@@ -156,7 +161,7 @@ export default function Admin() {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       setNewUserDialog(false);
       setGeneratedPassword({ userId: response.user.id, password: response.password });
-      setNewUser({ fullName: "", email: "", role: null, managerId: null, department: "", homeCityId: null, userType: "employee" });
+      setNewUser({ fullName: "", email: "", role: null, managerId: null, department: "", homeCityId: null, employmentStatus: "active", userType: "employee" });
     },
     onError: () => {
       toast({
@@ -248,6 +253,7 @@ export default function Admin() {
         userType: editingUser.userType,
         managerId: editingUser.managerId ?? undefined,
         homeCityId: editingUser.homeCityId ?? undefined,
+        employmentStatus: editingUser.employmentStatus,
       } 
     });
   };
@@ -269,6 +275,7 @@ export default function Admin() {
         managerId: manualEditingUser.managerId ?? undefined,
         role: manualEditingUser.role ?? undefined,
         homeCityId: manualEditingUser.homeCityId ?? undefined,
+        employmentStatus: manualEditingUser.employmentStatus,
       },
     });
   };
@@ -1016,7 +1023,7 @@ export default function Admin() {
                       <SelectContent>
                         <SelectItem value="none">Нет</SelectItem>
                         {sortedUsers
-                          .filter(u => u.userType === "manager" && u.id !== editingUser.id)
+                          .filter(u => u.userType === "manager" && u.employmentStatus === "active" && u.id !== editingUser.id)
                           .map(u => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.fullName}
@@ -1034,6 +1041,17 @@ export default function Admin() {
                         {[...cities].sort((first, second) => first.name.localeCompare(second.name, "ru")).map((city) => (
                           <SelectItem key={city.id} value={city.id}>{city.name}{city.region ? ` - ${city.region}` : ""}</SelectItem>
                         ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Статус сотрудника</Label>
+                    <Select value={editingUser.employmentStatus} onValueChange={(value) => setEditingUser({ ...editingUser, employmentStatus: value as EmploymentStatus })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Действующий</SelectItem>
+                        <SelectItem value="maternity_leave">Декрет</SelectItem>
+                        <SelectItem value="dismissed">Уволен</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1109,7 +1127,7 @@ export default function Admin() {
                       <SelectContent>
                         <SelectItem value="none">Нет</SelectItem>
                         {sortedUsers
-                          .filter(u => u.id !== manualEditingUser.id)
+                          .filter(u => u.employmentStatus === "active" && u.id !== manualEditingUser.id)
                           .map(u => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.fullName}
@@ -1127,6 +1145,17 @@ export default function Admin() {
                         {[...cities].sort((first, second) => first.name.localeCompare(second.name, "ru")).map((city) => (
                           <SelectItem key={city.id} value={city.id}>{city.name}{city.region ? ` - ${city.region}` : ""}</SelectItem>
                         ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Статус сотрудника</Label>
+                    <Select value={manualEditingUser.employmentStatus} onValueChange={(value) => setManualEditingUser({ ...manualEditingUser, employmentStatus: value as EmploymentStatus })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Действующий</SelectItem>
+                        <SelectItem value="maternity_leave">Декрет</SelectItem>
+                        <SelectItem value="dismissed">Уволен</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1264,7 +1293,7 @@ export default function Admin() {
                           <SelectContent>
                             <SelectItem value="none">Нет</SelectItem>
                             {sortedUsers
-                              .filter(u => u.userType === "manager")
+                              .filter(u => u.userType === "manager" && u.employmentStatus === "active")
                               .map(u => (
                                 <SelectItem key={u.id} value={u.id}>
                                   {u.fullName}
@@ -1327,6 +1356,7 @@ export default function Admin() {
                         <TableHead className="text-xs md:text-sm hidden sm:table-cell">Должность</TableHead>
                         <TableHead className="text-xs md:text-sm hidden md:table-cell">Отдел</TableHead>
                         <TableHead className="text-xs md:text-sm">Тип</TableHead>
+                        <TableHead className="text-xs md:text-sm">Статус</TableHead>
                         <TableHead className="text-xs md:text-sm hidden lg:table-cell">Руководитель</TableHead>
                         <TableHead className="text-xs md:text-sm">Действия</TableHead>
                       </TableRow>
@@ -1334,7 +1364,7 @@ export default function Admin() {
                     <TableBody>
                       {filteredUsers.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
+                          <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Ничего не найдено</TableCell>
                         </TableRow>
                       ) : filteredUsers.map(u => (
                         <TableRow key={u.id}>
@@ -1344,6 +1374,11 @@ export default function Admin() {
                           <TableCell className="text-xs md:text-sm hidden md:table-cell truncate">{u.department || "—"}</TableCell>
                           <TableCell className="text-xs md:text-sm">
                             <Badge variant="secondary" className="text-[10px] md:text-xs">{u.userType === "manager" ? "РУК" : "СОТ"}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs md:text-sm">
+                            <Badge variant={u.employmentStatus === "active" ? "secondary" : "outline"} className="text-[10px] md:text-xs">
+                              {u.employmentStatus === "maternity_leave" ? "Декрет" : u.employmentStatus === "dismissed" ? "Уволен" : "Действующий"}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-xs md:text-sm hidden lg:table-cell truncate">
                             {users.find(m => m.id === u.managerId)?.fullName || u.managerName || "—"}

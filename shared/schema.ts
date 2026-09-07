@@ -38,6 +38,7 @@ export type TripStatus =
   | "rescheduling";
 export type TripType = "planned" | "unplanned";
 export type TripMemoType = "unplanned" | "reschedule";
+export type EmploymentStatus = "active" | "maternity_leave" | "dismissed";
 
 // Пользователи/Сотрудники
 export const users = pgTable("trip_planner_users", {
@@ -52,6 +53,7 @@ export const users = pgTable("trip_planner_users", {
   managerName: text("manager_name"), // ФИО руководителя из Excel (как есть, без изменений)
   department: text("department"), // Отдел - КЛЮЧЕВОЙ ФИЛЬТР для видимости коллег
   homeCityId: varchar("home_city_id"), // Город проживания из справочника городов
+  employmentStatus: text("employment_status").$type<EmploymentStatus>().notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

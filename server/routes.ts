@@ -285,7 +285,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const defaultWorkflowDeputyCeoName = "Горельский Евгений Александрович";
 
   async function getRequiredWorkflowReviewer(role: "coordinator" | "deputy_ceo" | "ceo") {
-    const reviewers = (await storage.getAllUsers()).filter((user) => user.role === role);
+    const reviewers = (await storage.getAllUsers()).filter((user) => user.role === role && user.employmentStatus === "active");
     if (role === "deputy_ceo") {
       const configuredDeputyId = process.env.WORKFLOW_DEPUTY_CEO_ID?.trim();
       const configuredDeputyName = process.env.WORKFLOW_DEPUTY_CEO_NAME?.trim() || defaultWorkflowDeputyCeoName;
@@ -472,6 +472,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error(`[AUTH] Login failed for ${email} - invalid credentials`);
         return res.status(401).json({ error: "Invalid email or password" });
       }
+      if (user.employmentStatus !== "active") {
+        return res.status(403).json({ error: "Учетная запись сотрудника неактивна" });
+      }
 
       req.session.userId = user.id;
       await startLoginSession(req, user);
@@ -645,6 +648,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = await storage.getAllUsers();
       }
 
+      const includeInactive = req.query.includeInactive === "true" && ["admin", "coordinator"].includes(currentUser.role || "");
+      if (!includeInactive) users = users.filter((candidate) => candidate.employmentStatus === "active");
       res.json(users
         .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"))
         .map(withoutPassword));
@@ -873,6 +878,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
       if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const tripEmployee = await storage.getUser(data.employeeId);
+      if (!tripEmployee || tripEmployee.employmentStatus !== "active") {
+        return res.status(400).json({ error: "Нельзя создать командировку для сотрудника в декрете или уволенного" });
+      }
       if (data.employeeId !== currentUser.id && currentUser.role !== "admin") {
         return res.status(403).json({ error: "Можно создавать командировки только от своего имени" });
       }
@@ -1716,6 +1725,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = await storage.getAllUsers();
       }
 
+      const includeInactive = req.query.includeInactive === "true" && ["admin", "coordinator"].includes(currentUser.role || "");
+      if (!includeInactive) users = users.filter((candidate) => candidate.employmentStatus === "active");
       res.json(users
         .sort((first, second) => first.fullName.localeCompare(second.fullName, "ru"))
         .map(withoutPassword));
@@ -1913,6 +1924,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const currentUser = req.session.userId ? await storage.getUser(req.session.userId) : null;
       if (!currentUser) return res.status(401).json({ error: "Not authenticated" });
+      const tripEmployee = await storage.getUser(data.employeeId);
+      if (!tripEmployee || tripEmployee.employmentStatus !== "active") {
+        return res.status(400).json({ error: "Нельзя создать командировку для сотрудника в декрете или уволенного" });
+      }
       if (data.employeeId !== currentUser.id && currentUser.role !== "admin") {
         return res.status(403).json({ error: "Можно создавать командировки только от своего имени" });
       }
@@ -2559,7 +2574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Chat contacts: system administrator and coordinator first, then colleagues and the direct manager.
   const getChatContacts = async (user: User) => {
-    const users = await storage.getAllUsers();
+    const users = (await storage.getAllUsers()).filter((candidate) => candidate.employmentStatus === "active");
 
     if (["admin", "coordinator"].includes(user.role || "")) {
       return users

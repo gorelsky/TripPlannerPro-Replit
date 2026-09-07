@@ -110,7 +110,10 @@ export default function Dashboard() {
     ? trips
     : trips.filter((trip) => trip.employeeId === user?.id);
 
-  const recentTrips = filteredTrips.slice(0, 5);
+  const sortTripsByStartDate = (first: TripWithDetails, second: TripWithDetails) =>
+    first.startDate.localeCompare(second.startDate) || first.endDate.localeCompare(second.endDate);
+
+  const recentTrips = [...filteredTrips].sort(sortTripsByStartDate).slice(0, 5);
 
   // Функция расчета суточных
   const calculateAllowance = (startDate: string, endDate: string, transportType: TransportType) => {
@@ -147,6 +150,7 @@ export default function Dashboard() {
     });
     modalTitle = `Активных командировок (${displayTrips.length})`;
   }
+  displayTrips = [...displayTrips].sort(sortTripsByStartDate);
 
   // Trips pending approval — fetched from server-side endpoint that correctly handles hierarchy
   const pendingTripsToApprove = approvalTrips.filter((trip) =>
@@ -510,7 +514,7 @@ export default function Dashboard() {
           <CardHeader className="pb-3 md:pb-4">
             <CardTitle className="text-sm md:text-base">Последние командировки</CardTitle>
             <CardDescription className="text-xs md:text-sm">
-              Недавно созданные и обновленные
+              По дате начала: от ранних к поздним
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -340,7 +340,9 @@ export default function Trips() {
       (isAdmin && (trip.employee?.fullName || "").toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesStatus = statusFilter === "all" || trip.status === statusFilter;
     return matchesSearch && matchesStatus;
-  });
+  }).sort((first, second) =>
+    first.startDate.localeCompare(second.startDate) || first.endDate.localeCompare(second.endDate),
+  );
 
   const sourceTrips = trips
     .filter((trip) => trip.employeeId === (isAdmin ? selectedEmployeeId : currentUser?.id) && trip.status !== "rejected" && trip.status !== "rescheduling")

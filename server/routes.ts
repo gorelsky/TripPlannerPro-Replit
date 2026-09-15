@@ -19,7 +19,7 @@ import {
   type User,
   type TripStatus 
 } from "@shared/schema";
-import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
+import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
@@ -3193,6 +3193,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send credentials" });
+    }
+  });
+
+  // Send access details to a newly created user. A new temporary password is used
+  // so the password shown only in the administrator's browser is never emailed later.
+  app.post("/api/users/:id/send-temporary-password", requireAdmin, async (req, res) => {
+    try {
+      const targetUser = await storage.getUser(req.params.id);
+      if (!targetUser) return res.status(404).json({ error: "User not found" });
+
+      const newPassword = generateRandomPassword(8);
+      const previousPasswordHash = targetUser.password;
+      const updatedUser = await storage.updateUser(targetUser.id, { password: newPassword } as any);
+      if (!updatedUser) return res.status(404).json({ error: "User not found while updating the password" });
+
+      const emailSent = await sendEmail({
+        to: targetUser.email,
+        subject: "Доступ к системе командировок",
+        html: generateNewUserCredentialEmail(targetUser.fullName, targetUser.email, newPassword),
+      });
+      if (!emailSent) {
+        await storage.restoreUserPasswordHash(targetUser.id, previousPasswordHash);
+        return res.status(502).json({ error: "Письмо не было принято почтовым сервером. Прежний пароль сохранен." });
+      }
+
+      res.json({ success: true, email: targetUser.email });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send temporary password" });
+    }
+  });
+
+  // Administrator can set a password manually when a user needs immediate access.
+  app.patch("/api/users/:id/password", requireAdmin, async (req, res) => {
+    try {
+      const password = typeof req.body?.password === "string" ? req.body.password : "";
+      const validation = validatePassword(password);
+      if (!validation.valid) return res.status(400).json({ error: validation.errors.join(". ") });
+
+      const updatedUser = await storage.updateUser(req.params.id, { password } as any);
+      if (!updatedUser) return res.status(404).json({ error: "User not found" });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update password" });
     }
   });
 

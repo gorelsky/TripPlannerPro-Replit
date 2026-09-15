@@ -127,6 +127,28 @@ export function generateCredentialEmail(fullName: string, email: string, passwor
   `;
 }
 
+export function generateNewUserCredentialEmail(fullName: string, email: string, password: string): string {
+  const appUrl = process.env.APP_URL || "/";
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+          <h2>Доступ к системе командировок</h2>
+          <p>Добрый день, ${escapeHtml(fullName)}!</p>
+          <p>Для вас создана учетная запись в системе планирования и согласования командировок.</p>
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>Email (логин):</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(email)}</code></p>
+            <p><strong>Временный пароль:</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(password)}</code></p>
+          </div>
+          <p style="color: #666; font-size: 14px;"><strong>Важно:</strong> после первого входа смените временный пароль в разделе «Мой профиль» → «Пароль».</p>
+          <p style="margin: 24px 0;"><a href="${escapeHtml(appUrl)}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Перейти в приложение</a></p>
+          <p>С уважением,<br>Администратор приложения</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export function generatePasswordResetEmail(fullName: string, email: string, password: string): string {
   const appUrl = process.env.APP_URL || "/";
   return `

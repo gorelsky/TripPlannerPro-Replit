@@ -154,6 +154,8 @@ export default function Admin() {
   const [deleteConfirmDialog, setDeleteConfirmDialog] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
+  const [passwordChangeUser, setPasswordChangeUser] = useState<User | null>(null);
+  const [adminPassword, setAdminPassword] = useState("");
 
   const createUserMutation = useMutation({
     mutationFn: (data: InsertUser) => apiRequest("POST", "/api/users", data),
@@ -223,6 +225,34 @@ export default function Admin() {
     },
     onError: (error: Error) => {
       toast({ title: "Не удалось сбросить пароль", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const sendTemporaryPasswordMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest("POST", `/api/users/${id}/send-temporary-password`, {});
+      return response.json() as Promise<{ email: string }>;
+    },
+    onSuccess: ({ email }) => {
+      setGeneratedPassword(null);
+      toast({ title: "Письмо отправлено", description: `Временный пароль направлен на ${email}` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Не удалось отправить пароль", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async ({ id, password }: { id: string; password: string }) => {
+      await apiRequest("PATCH", `/api/users/${id}/password`, { password });
+    },
+    onSuccess: () => {
+      setPasswordChangeUser(null);
+      setAdminPassword("");
+      toast({ title: "Пароль изменен", description: "Новый пароль установлен для пользователя" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Не удалось изменить пароль", description: error.message, variant: "destructive" });
     },
   });
 
@@ -900,22 +930,30 @@ export default function Admin() {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-green-200 dark:border-green-800">
               <p className="text-sm text-muted-foreground mb-2">Временный пароль:</p>
               <p className="font-mono text-lg font-bold text-green-700 dark:text-green-300 mb-4">{generatedPassword.password}</p>
-              <p className="text-sm text-muted-foreground mb-4">Скопируйте этот пароль и отправьте пользователю. Пароль сохранен только в этом сообщении.</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  navigator.clipboard.writeText(generatedPassword.password);
-                  toast({
-                    title: "Скопировано",
-                    description: "Пароль скопирован в буфер обмена",
-                  });
-                }}
-                data-testid="button-copy-password"
-              >
-                <Copy className="h-4 w-4 mr-2" />
-                Скопировать пароль
-              </Button>
+              <p className="text-sm text-muted-foreground mb-4">Можно скопировать пароль или направить пользователю новый временный пароль на рабочую почту.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(generatedPassword.password);
+                    toast({ title: "Скопировано", description: "Пароль скопирован в буфер обмена" });
+                  }}
+                  data-testid="button-copy-password"
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Скопировать пароль
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => sendTemporaryPasswordMutation.mutate(generatedPassword.userId)}
+                  disabled={sendTemporaryPasswordMutation.isPending}
+                  data-testid="button-send-new-user-password"
+                >
+                  <Mail className="h-4 w-4 mr-2" />
+                  {sendTemporaryPasswordMutation.isPending ? "Отправка..." : "Отправить на email"}
+                </Button>
+              </div>
             </div>
             <Button
               onClick={() => setGeneratedPassword(null)}
@@ -1400,13 +1438,28 @@ export default function Admin() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => setPasswordResetUser(u)}
-                                  disabled={resetPasswordMutation.isPending}
-                                  title="Сбросить пароль"
-                                  aria-label={`Сбросить пароль: ${u.fullName}`}
-                                  data-testid={`button-reset-password-${u.id}`}
+                                  onClick={() => {
+                                    setPasswordChangeUser(u);
+                                    setAdminPassword("");
+                                  }}
+                                  title="Установить пароль"
+                                  aria-label={`Установить пароль: ${u.fullName}`}
+                                  data-testid={`button-change-password-${u.id}`}
                                 >
                                   <KeyRound className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {!isCoordinator && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setPasswordResetUser(u)}
+                                  disabled={resetPasswordMutation.isPending}
+                                  title="Сбросить пароль и отправить email"
+                                  aria-label={`Сбросить пароль и отправить email: ${u.fullName}`}
+                                  data-testid={`button-reset-password-${u.id}`}
+                                >
+                                  <Mail className="h-4 w-4" />
                                 </Button>
                               )}
                               <Button
@@ -1486,6 +1539,49 @@ export default function Admin() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <Dialog
+            open={Boolean(passwordChangeUser)}
+            onOpenChange={(open) => {
+              if (!open && !changePasswordMutation.isPending) {
+                setPasswordChangeUser(null);
+                setAdminPassword("");
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Установить новый пароль</DialogTitle>
+                <DialogDescription>
+                  Новый пароль будет установлен для пользователя {passwordChangeUser?.fullName}. Он не отправляется по email автоматически.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-2 py-2">
+                <Label htmlFor="admin-user-password">Новый пароль</Label>
+                <Input
+                  id="admin-user-password"
+                  type="password"
+                  value={adminPassword}
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                  placeholder="Минимум 8 символов"
+                  autoComplete="new-password"
+                />
+                <p className="text-xs text-muted-foreground">Минимум 8 символов, со строчной и прописной буквой, а также цифрой.</p>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPasswordChangeUser(null)} disabled={changePasswordMutation.isPending}>Отмена</Button>
+                <Button
+                  onClick={() => {
+                    if (!passwordChangeUser) return;
+                    changePasswordMutation.mutate({ id: passwordChangeUser.id, password: adminPassword });
+                  }}
+                  disabled={changePasswordMutation.isPending || !adminPassword}
+                  data-testid="button-confirm-change-password"
+                >
+                  {changePasswordMutation.isPending ? "Сохранение..." : "Установить пароль"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* ============ CITIES TAB ============ */}

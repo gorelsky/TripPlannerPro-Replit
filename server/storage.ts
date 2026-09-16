@@ -163,9 +163,17 @@ export class PostgresStorage implements IStorage {
           to_user_id varchar NOT NULL,
           message text NOT NULL,
           is_read text NOT NULL DEFAULT 'false',
+          sender_time_zone text,
+          client_sent_at timestamptz,
           created_at timestamp NOT NULL DEFAULT now()
         )
-      `).then(() => undefined);
+      `)
+        .then(() => db.execute(sql`
+          ALTER TABLE trip_planner_chat_messages
+            ADD COLUMN IF NOT EXISTS sender_time_zone text,
+            ADD COLUMN IF NOT EXISTS client_sent_at timestamptz
+        `))
+        .then(() => undefined);
     }
     return this.chatTableReady;
   }
@@ -861,6 +869,8 @@ export class PostgresStorage implements IStorage {
       id: randomUUID(),
       ...message,
       isRead: "false",
+      senderTimeZone: message.senderTimeZone ?? null,
+      clientSentAt: message.clientSentAt ?? null,
       createdAt: new Date(),
     };
     await db.insert(chatMessages).values(newMessage as any);

@@ -2940,6 +2940,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const recipientId = typeof req.body?.toUserId === "string" ? req.body.toUserId : undefined;
+      const requestedTimeZone = typeof req.body?.senderTimeZone === "string"
+        ? req.body.senderTimeZone.trim()
+        : undefined;
+      let senderTimeZone: string | undefined;
+      if (requestedTimeZone && requestedTimeZone.length <= 100) {
+        try {
+          Intl.DateTimeFormat(undefined, { timeZone: requestedTimeZone });
+          senderTimeZone = requestedTimeZone;
+        } catch {
+          // Ignore an invalid browser time zone and retain the server timestamp.
+        }
+      }
+      const requestedClientSentAt = typeof req.body?.clientSentAt === "string"
+        ? new Date(req.body.clientSentAt)
+        : undefined;
+      const clientSentAt = requestedClientSentAt && !Number.isNaN(requestedClientSentAt.getTime())
+        ? requestedClientSentAt
+        : undefined;
 
       if (!recipientId || recipientId === currentUser.id) {
         return res.status(400).json({ error: "Recipient is required" });
@@ -2956,6 +2974,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fromUserId: currentUser.id,
         toUserId: recipientId,
         message,
+        senderTimeZone,
+        clientSentAt,
       });
       void sendEmail({
         to: recipient.email,

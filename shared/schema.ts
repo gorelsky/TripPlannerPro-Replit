@@ -151,6 +151,8 @@ export const chatMessages = pgTable("trip_planner_chat_messages", {
   toUserId: varchar("to_user_id").notNull(),
   message: text("message").notNull(),
   isRead: text("is_read").notNull().default("false"),
+  senderTimeZone: text("sender_time_zone"),
+  clientSentAt: timestamp("client_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

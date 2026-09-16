@@ -11,13 +11,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { ChatMessage, User } from "@shared/schema";
 
-function formatTime(value: Date | string) {
-  return new Date(value).toLocaleString("ru-RU", {
+function formatTime(message: ChatMessage) {
+  const value = message.clientSentAt ?? message.createdAt;
+  const options: Intl.DateTimeFormatOptions = {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  };
+
+  try {
+    return new Intl.DateTimeFormat("ru-RU", {
+      ...options,
+      ...(message.senderTimeZone ? { timeZone: message.senderTimeZone } : {}),
+    }).format(new Date(value));
+  } catch {
+    return new Intl.DateTimeFormat("ru-RU", options).format(new Date(value));
+  }
 }
 
 type ChatUnreadData = {
@@ -78,6 +88,8 @@ export default function Chat() {
       const response = await apiRequest("POST", "/api/chat/messages", {
         message,
         toUserId: selectedUserId,
+        senderTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        clientSentAt: new Date().toISOString(),
       });
       return response.json() as Promise<ChatMessage>;
     },
@@ -197,7 +209,7 @@ export default function Chat() {
                           <div className={`max-w-[92%] rounded-md px-3 py-2 text-sm sm:max-w-[85%] ${ownMessage ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                             <p className="whitespace-pre-wrap break-words">{chatMessage.message}</p>
                             <p className={`mt-1 text-[11px] ${ownMessage ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
-                              {formatTime(chatMessage.createdAt)}
+                              {formatTime(chatMessage)}
                             </p>
                           </div>
                         </div>

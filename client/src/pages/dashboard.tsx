@@ -113,7 +113,33 @@ export default function Dashboard() {
   const sortTripsByStartDate = (first: TripWithDetails, second: TripWithDetails) =>
     first.startDate.localeCompare(second.startDate) || first.endDate.localeCompare(second.endDate);
 
-  const recentTrips = [...filteredTrips].sort(sortTripsByStartDate).slice(0, 5);
+  const formatLocalDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const shiftDateKey = (date: Date, days: number) => {
+    const shifted = new Date(date);
+    shifted.setDate(shifted.getDate() + days);
+    return formatLocalDateKey(shifted);
+  };
+
+  const todayDate = new Date();
+  const todayKey = formatLocalDateKey(todayDate);
+  const recentWindowStart = shiftDateKey(todayDate, -2);
+  const recentWindowEnd = shiftDateKey(todayDate, 2);
+  const getTripDistanceFromToday = (trip: TripWithDetails) => {
+    if (trip.startDate <= todayKey && trip.endDate >= todayKey) return 0;
+    if (trip.startDate > todayKey) return Math.max(1, Math.round((new Date(`${trip.startDate}T00:00:00`).getTime() - todayDate.getTime()) / 86400000));
+    return Math.max(1, Math.round((todayDate.getTime() - new Date(`${trip.endDate}T00:00:00`).getTime()) / 86400000));
+  };
+
+  const recentTrips = filteredTrips
+    .filter((trip) => trip.endDate >= recentWindowStart && trip.startDate <= recentWindowEnd)
+    .sort((first, second) => getTripDistanceFromToday(first) - getTripDistanceFromToday(second) || sortTripsByStartDate(first, second))
+    .slice(0, 5);
 
   // Функция расчета суточных
   const calculateAllowance = (startDate: string, endDate: string, transportType: TransportType) => {
@@ -514,7 +540,7 @@ export default function Dashboard() {
           <CardHeader className="pb-3 md:pb-4">
             <CardTitle className="text-sm md:text-base">Последние командировки</CardTitle>
             <CardDescription className="text-xs md:text-sm">
-              По дате начала: от ранних к поздним
+              Ближайшие поездки и завершившиеся за последние два дня
             </CardDescription>
           </CardHeader>
           <CardContent>

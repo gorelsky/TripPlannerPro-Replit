@@ -1,15 +1,18 @@
 import dotenv from "dotenv";
 import { defineConfig } from "drizzle-kit";
+import { getDatabaseConfig } from "./server/database-config";
 
 dotenv.config({ override: true });
 
-const databaseUrl = process.env.DRIZZLE_DATABASE_URL || process.env.DATABASE_URL || process.env.SUPABASE_DATABASE_URL;
+const databaseConfig = process.env.DRIZZLE_DATABASE_URL?.trim()
+  ? {
+      target: "supabase" as const,
+      connectionString: process.env.DRIZZLE_DATABASE_URL.trim(),
+      ssl: { rejectUnauthorized: false },
+    }
+  : getDatabaseConfig();
 
-if (!databaseUrl) {
-  throw new Error("DRIZZLE_DATABASE_URL or DATABASE_URL is required");
-}
-
-const parsedDatabaseUrl = new URL(databaseUrl);
+const parsedDatabaseUrl = new URL(databaseConfig.connectionString);
 
 export default defineConfig({
   out: "./migrations",

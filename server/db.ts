@@ -4,18 +4,17 @@ dotenv.config({ override: true });
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
+import { getDatabaseConfig } from "./database-config";
 
 const { Pool } = pg;
 
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL environment variable is required");
-}
+const databaseConfig = getDatabaseConfig();
 
-// Supabase requires encrypted connections from application servers.
 export const pool = new Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false },
+  connectionString: databaseConfig.connectionString,
+  ssl: databaseConfig.ssl,
 });
+
+console.log(`[DB] PostgreSQL target: ${databaseConfig.target}`);
 
 export const db = drizzle(pool);

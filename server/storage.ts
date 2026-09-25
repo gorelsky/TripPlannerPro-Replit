@@ -343,6 +343,27 @@ export class PostgresStorage implements IStorage {
       await this.ensureTripMemoColumns();
       await this.ensureEmploymentStatusColumn();
 
+      const usersCount = await db.select().from(users);
+      if (usersCount.length === 0 && process.env.BOOTSTRAP_ADMIN_EMAIL && process.env.BOOTSTRAP_ADMIN_PASSWORD) {
+        const bootstrapAdmin = {
+          id: randomUUID(),
+          fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
+          email: process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase(),
+          password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
+          role: "admin" as const,
+          jobTitle: "Администратор",
+          userType: "manager" as const,
+          managerId: null,
+          managerName: null,
+          department: null,
+          homeCityId: null,
+          employmentStatus: "active" as const,
+          createdAt: new Date(),
+        };
+        await db.insert(users).values(bootstrapAdmin as any);
+        console.log(`[INIT] Bootstrap administrator created: ${bootstrapAdmin.email}`);
+      }
+
       // Create cities if not exist
       const citiesCount = await db.select().from(cities);
       if (citiesCount.length === 0) {

@@ -8,6 +8,34 @@
       "when": 1785761746525,
       "tag": "0000_zippy_hemingway",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785761746526,
+      "tag": "0001_add_trivio_booking_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785761746527,
+      "tag": "0002_add_trip_type_and_unplanned_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785761746528,
+      "tag": "0003_add_trip_memo_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785761746529,
+      "tag": "0004_add_current_runtime_fields",
+      "breakpoints": true
     }
   ]
 }

@@ -19,8 +19,8 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/attached_assets ./attached_assets
-COPY --from=build /app/uploads ./uploads
+RUN mkdir -p uploads
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "node scripts/migrate.mjs && node dist/index.js"]
+CMD ["node", "scripts/start.mjs"]

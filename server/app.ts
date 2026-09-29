@@ -73,6 +73,10 @@ app.use(session({
 declare module 'express-session' {
   interface SessionData {
     userId: string;
+    loginSessionId?: string;
+    oidcState?: string;
+    oidcNonce?: string;
+    oidcCodeVerifier?: string;
   }
 }
 

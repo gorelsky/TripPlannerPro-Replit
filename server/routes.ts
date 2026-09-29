@@ -2,7 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import ExcelJS from "exceljs";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
@@ -454,6 +455,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // ============ AUTH ============
+
+  const oidcIssuer = process.env.OIDC_ISSUER?.trim() || "https://auth.yandex.cloud";
+  const oidcClientId = process.env.OIDC_CLIENT_ID?.trim();
+  const oidcAuthorizationUrl = process.env.OIDC_AUTHORIZATION_URL?.trim() || `${oidcIssuer}/oauth/authorize`;
+  const oidcTokenUrl = process.env.OIDC_TOKEN_URL?.trim() || `${oidcIssuer}/oauth/token`;
+  const oidcUserInfoUrl = process.env.OIDC_USERINFO_URL?.trim() || `${oidcIssuer}/oauth/userinfo`;
+  const oidcJwksUrl = process.env.OIDC_JWKS_URL?.trim() || `${oidcIssuer}/oauth/jwks/keys`;
+  const oidcScope = process.env.OIDC_SCOPE?.trim() || "openid email profile";
+  const oidcJwks = createRemoteJWKSet(new URL(oidcJwksUrl));
+
+  function base64Url(value: Buffer) {
+    return value.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  }
+
+  function oidcRedirectUri(req: any) {
+    return process.env.OIDC_REDIRECT_URI?.trim() || `${req.protocol}://${req.get("host")}/api/auth/yandex/callback`;
+  }
+
+  function authErrorRedirect(message: string) {
+    return `/?authError=${encodeURIComponent(message)}`;
+  }
+
+  app.get("/api/auth/yandex/status", (_req, res) => {
+    res.json({ enabled: Boolean(oidcClientId) });
+  });
+
+  app.get("/api/auth/yandex/start", (req, res) => {
+    if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
+
+    const state = base64Url(randomBytes(32));
+    const nonce = base64Url(randomBytes(32));
+    const codeVerifier = base64Url(randomBytes(48));
+    const codeChallenge = base64Url(createHash("sha256").update(codeVerifier).digest());
+    req.session.oidcState = state;
+    req.session.oidcNonce = nonce;
+    req.session.oidcCodeVerifier = codeVerifier;
+
+    const authorizationUrl = new URL(oidcAuthorizationUrl);
+    authorizationUrl.search = new URLSearchParams({
+      response_type: "code",
+      client_id: oidcClientId,
+      redirect_uri: oidcRedirectUri(req),
+      scope: oidcScope,
+      state,
+      nonce,
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+    }).toString();
+
+    req.session.save((error) => {
+      if (error) {
+        console.error("[OIDC] Failed to save authorization session:", error);
+        return res.redirect(authErrorRedirect("Не удалось начать корпоративный вход"));
+      }
+      res.redirect(authorizationUrl.toString());
+    });
+  });
+
+  app.get("/api/auth/yandex/callback", async (req, res) => {
+    if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
+    const { code, state, error } = req.query as Record<string, string | undefined>;
+    if (error) return res.redirect(authErrorRedirect("Вход через Яндекс был отменен"));
+    if (!code || !state || state !== req.session.oidcState) {
+      return res.redirect(authErrorRedirect("Неверная или устаревшая сессия корпоративного входа"));
+    }
+
+    const codeVerifier = req.session.oidcCodeVerifier;
+    const nonce = req.session.oidcNonce;
+    delete req.session.oidcState;
+    delete req.session.oidcNonce;
+    delete req.session.oidcCodeVerifier;
+
+    try {
+      if (!codeVerifier || !nonce) throw new Error("OIDC session data is missing");
+      const tokenResponse = await fetch(oidcTokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: oidcClientId,
+          ...(process.env.OIDC_CLIENT_SECRET ? { client_secret: process.env.OIDC_CLIENT_SECRET } : {}),
+          code,
+          redirect_uri: oidcRedirectUri(req),
+          code_verifier: codeVerifier,
+        }),
+      });
+      if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${tokenResponse.status}`);
+      const tokens = await tokenResponse.json() as { id_token?: string; access_token?: string };
+      if (!tokens.id_token || !tokens.access_token) throw new Error("OIDC tokens are missing");
+
+      const verified = await jwtVerify(tokens.id_token, oidcJwks as any, {
+        issuer: oidcIssuer,
+        audience: oidcClientId,
+      });
+      const claims = verified.payload as Record<string, unknown>;
+      if (claims.nonce !== nonce) throw new Error("OIDC nonce validation failed");
+      const userInfoResponse = await fetch(oidcUserInfoUrl, {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      if (!userInfoResponse.ok) throw new Error(`Userinfo request failed: ${userInfoResponse.status}`);
+      const userInfo = await userInfoResponse.json() as Record<string, unknown>;
+      const email = String(userInfo.email || claims.email || "").trim().toLowerCase();
+      if (!email) throw new Error("Corporate email is missing");
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) return res.redirect(authErrorRedirect("Пользователь не найден в списке доступа"));
+      if (user.employmentStatus !== "active") return res.redirect(authErrorRedirect("Доступ пользователя отключен"));
+
+      req.session.userId = user.id;
+      await startLoginSession(req, user);
+      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      return res.redirect("/");
+    } catch (callbackError) {
+      console.error("[OIDC] Callback failed:", callbackError);
+      return res.redirect(authErrorRedirect("Не удалось выполнить корпоративный вход"));
+    }
+  });
   
   // Login
   app.post("/api/auth/login", async (req, res) => {

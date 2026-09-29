@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { LogIn, AlertCircle } from "lucide-react";
+import { AlertCircle, Building2 } from "lucide-react";
 import slsLogo from "@assets/Средний_лого_1773929015411.png";
 
 export default function Login() {
@@ -13,8 +13,18 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [oidcEnabled, setOidcEnabled] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
+
+  useEffect(() => {
+    const authError = new URLSearchParams(window.location.search).get("authError");
+    if (authError) setError(authError);
+    fetch("/api/auth/yandex/status")
+      .then((response) => response.ok ? response.json() : { enabled: false })
+      .then((data) => setOidcEnabled(Boolean(data.enabled)))
+      .catch(() => setOidcEnabled(false));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,6 +107,14 @@ export default function Login() {
             >
               {isLoading ? "Вход..." : "Войти"}
             </Button>
+            {oidcEnabled && (
+              <Button asChild type="button" variant="outline" className="w-full">
+                <a href="/api/auth/yandex/start" data-testid="button-login-yandex">
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Войти через Яндекс 360
+                </a>
+              </Button>
+            )}
             <a
               href="mailto:admin.tripplanner@sls-pharma.ru?subject=%D0%92%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20%D0%B4%D0%BE%D1%81%D1%82%D1%83%D0%BF%D0%B0%20%D0%BA%20%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BC%D0%B5%20%D0%BA%D0%BE%D0%BC%D0%B0%D0%BD%D0%B4%D0%B8%D1%80%D0%BE%D0%B2%D0%BE%D0%BA"
               className="block text-center text-xs text-muted-foreground hover:text-primary hover:underline"

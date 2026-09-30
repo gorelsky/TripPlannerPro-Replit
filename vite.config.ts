@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const defaultProductionAssetOrigin = "https://tripplanner-sls.up.railway.app";
+const defaultProductionAssetOrigin = "https://bba24tqeknn5rjnjom8k.containers.yandexcloud.net";
 
 function getProductionAssetBase() {
   const configuredOrigin =

@@ -121,6 +121,7 @@ export class PostgresStorage implements IStorage {
   private tripTypeColumnsReady?: Promise<void>;
   private tripMemoColumnsReady?: Promise<void>;
   private employmentStatusColumnReady?: Promise<void>;
+  private homeCityColumnReady?: Promise<void>;
 
   constructor() {
     this.initializationReady = this.initializeSampleData().then(() => this.fixInvalidRoles());
@@ -219,6 +220,16 @@ export class PostgresStorage implements IStorage {
       `).then(() => undefined);
     }
     return this.employmentStatusColumnReady;
+  }
+
+  private ensureHomeCityColumn(): Promise<void> {
+    if (!this.homeCityColumnReady) {
+      this.homeCityColumnReady = db.execute(sql`
+        ALTER TABLE trip_planner_users
+          ADD COLUMN IF NOT EXISTS home_city_id varchar
+      `).then(() => undefined);
+    }
+    return this.homeCityColumnReady;
   }
 
   private determineRoleFromJobTitle(jobTitle: string | undefined | null): string | null {
@@ -342,6 +353,7 @@ export class PostgresStorage implements IStorage {
       await this.ensureTripTypeColumns();
       await this.ensureTripMemoColumns();
       await this.ensureEmploymentStatusColumn();
+      await this.ensureHomeCityColumn();
 
       const usersCount = await db.select().from(users);
       if (usersCount.length === 0 && process.env.BOOTSTRAP_ADMIN_EMAIL && process.env.BOOTSTRAP_ADMIN_PASSWORD) {

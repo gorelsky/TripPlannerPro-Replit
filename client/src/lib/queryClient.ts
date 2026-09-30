@@ -1,16 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-// Get session ID from localStorage for environments where cookies are blocked
-function getSessionId(): string | null {
-  return localStorage.getItem("sessionId");
-}
-
 function getHeaders(data?: unknown): Record<string, string> {
   const headers: Record<string, string> = {};
-  const sessionId = getSessionId();
-  if (sessionId) {
-    headers["X-Session-ID"] = sessionId;
-  }
   if (data) {
     headers["Content-Type"] = "application/json";
   }
@@ -67,7 +58,7 @@ export const queryClient = new QueryClient({
       // согласования и уведомления появляются автоматически.
       refetchInterval: 30_000,
       refetchOnWindowFocus: true,
-      staleTime: Infinity,
+      staleTime: 0,
       retry: false,
     },
     mutations: {

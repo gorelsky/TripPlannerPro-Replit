@@ -495,14 +495,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ AUTH ============
 
-  const oidcIssuer = process.env.OIDC_ISSUER?.trim() || "https://oauth.yandex.ru";
+  const oidcIssuer = process.env.OIDC_ISSUER?.trim() || "https://auth.yandex.cloud";
   const oidcClientId = process.env.OIDC_CLIENT_ID?.trim();
   const isYandexOAuth = oidcIssuer.includes("oauth.yandex.ru");
-  const oidcAuthorizationUrl = process.env.OIDC_AUTHORIZATION_URL?.trim() || `${oidcIssuer}/authorize`;
-  const oidcTokenUrl = process.env.OIDC_TOKEN_URL?.trim() || `${oidcIssuer}/token`;
-  const oidcUserInfoUrl = process.env.OIDC_USERINFO_URL?.trim() || "https://login.yandex.ru/info?format=json";
+  const oidcAuthorizationUrl = process.env.OIDC_AUTHORIZATION_URL?.trim() || `${oidcIssuer}/oauth/authorize`;
+  const oidcTokenUrl = process.env.OIDC_TOKEN_URL?.trim() || `${oidcIssuer}/oauth/token`;
+  const oidcUserInfoUrl = process.env.OIDC_USERINFO_URL?.trim() || (isYandexOAuth
+    ? "https://login.yandex.ru/info?format=json"
+    : `${oidcIssuer}/oauth/userinfo`);
   const oidcJwksUrl = process.env.OIDC_JWKS_URL?.trim() || `${oidcIssuer}/oauth/jwks/keys`;
   const oidcScope = process.env.OIDC_SCOPE?.trim() || (isYandexOAuth ? "login:email login:info" : "openid email profile");
+  const oidcPrompt = process.env.OIDC_PROMPT?.trim() || "select_account";
   const oidcJwks = createRemoteJWKSet(new URL(oidcJwksUrl));
 
   function base64Url(value: Buffer) {
@@ -525,11 +528,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return `/?authError=${encodeURIComponent(message)}`;
   }
 
+  function setAuthNoStore(res: any) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+  }
+
   app.get("/api/auth/yandex/status", (_req, res) => {
+    setAuthNoStore(res);
     res.json({ enabled: Boolean(oidcClientId) });
   });
 
   app.get("/api/auth/yandex/start", (req, res) => {
+    setAuthNoStore(res);
     if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
 
     const state = base64Url(randomBytes(32));
@@ -553,6 +563,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       client_id: oidcClientId,
       redirect_uri: oidcRedirectUri(req),
       scope: oidcScope,
+      prompt: oidcPrompt,
       state,
       nonce,
       code_challenge: codeChallenge,
@@ -569,6 +580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/auth/yandex/callback", async (req, res) => {
+    setAuthNoStore(res);
     if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
     const { code, state, error } = req.query as Record<string, string | undefined>;
     if (error) return res.redirect(authErrorRedirect("Вход через Яндекс был отменен"));
@@ -635,52 +647,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Login
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      console.log("[AUTH] Login attempt received");
-      const { email, password } = req.body;
-      console.log(`[AUTH] Email: ${email}, Password length: ${password?.length || 0}`);
-      
-      if (!email || !password) {
-        console.error("[AUTH] Missing email or password");
-        return res.status(400).json({ error: "Email and password required" });
-      }
-
-      const user = await storage.validatePassword(email, password);
-      if (!user) {
-        console.error(`[AUTH] Login failed for ${email} - invalid credentials`);
-        return res.status(401).json({ error: "Invalid email or password" });
-      }
-      if (user.employmentStatus !== "active") {
-        return res.status(403).json({ error: "Учетная запись сотрудника неактивна" });
-      }
-
-      req.session.userId = user.id;
-      await startLoginSession(req, user);
-      console.log(`[AUTH] Session userId set to: ${user.id}, sessionID: ${req.sessionID}`);
-      console.log(`[AUTH] Setting cookie with path: ${req.session.cookie.path}, secure: ${req.session.cookie.secure}, httpOnly: ${req.session.cookie.httpOnly}`);
-      const { password: _, ...userWithoutPassword } = user;
-      console.log(`[AUTH] User logged in: ${email}`);
-      
-      // Save session to ensure it persists
-      req.session.save((err) => {
-        if (err) {
-          console.error("[AUTH] Session save error:", err);
-          return res.status(500).json({ error: "Session save failed" });
-        }
-        console.log(`[AUTH] Session saved successfully, sessionID: ${req.sessionID}`);
-        // Also return sessionId for clients that can't store cookies (iframe environments)
-        res.json({ ...userWithoutPassword, sessionId: req.sessionID });
-      });
-    } catch (error) {
-      console.error("[AUTH] Login error:", error);
-      res.status(500).json({ error: "Login failed" });
-    }
+  // Локальный вход по паролю отключен: приложение использует только OIDC Яндекс 360.
+  app.post("/api/auth/login", (_req, res) => {
+    setAuthNoStore(res);
+    res.status(410).json({ error: "Локальный вход отключен. Используйте корпоративный вход через Яндекс 360." });
   });
 
   // Logout
   app.post("/api/auth/logout", async (req, res) => {
+    setAuthNoStore(res);
     await finishLoginSession(req, "logout");
     req.session.destroy((err) => {
       if (err) {
@@ -692,6 +667,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Get session
   app.get("/api/auth/session", async (req, res) => {
+    setAuthNoStore(res);
     try {
       if (!req.session.userId) {
         return res.status(401).json({ error: "Not authenticated" });

@@ -1,0 +1,32 @@
+name: Build TripPlanner image for Yandex Cloud
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: cr.yandex/${{ secrets.YC_REGISTRY_ID }}/tripplanner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Yandex Container Registry
+        env:
+          YC_SERVICE_ACCOUNT_KEY: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+        run: |
+          printf '%s' "$YC_SERVICE_ACCOUNT_KEY" | docker login cr.yandex --username json_key --password-stdin
+
+      - name: Build image
+        run: docker build --tag "$IMAGE:${GITHUB_SHA}" --tag "$IMAGE:latest" .
+
+      - name: Push image
+        run: |
+          docker push "$IMAGE:${GITHUB_SHA}"
+          docker push "$IMAGE:latest"

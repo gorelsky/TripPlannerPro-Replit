@@ -38,12 +38,21 @@ export default function Login() {
           )}
 
           {oidcEnabled ? (
-            <Button asChild className="w-full" data-testid="button-login-yandex">
-              <a href="/api/auth/yandex/start">
-                <Building2 className="mr-2 h-4 w-4" />
-                Войти через Яндекс 360
+            <div className="space-y-3">
+              <Button asChild className="w-full" data-testid="button-login-yandex">
+                <a href="/api/auth/yandex/start">
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Войти через Яндекс 360
+                </a>
+              </Button>
+              <a
+                href="/api/auth/yandex/start?account=other"
+                className="block text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                data-testid="link-switch-yandex-account"
+              >
+                Войти под другой учетной записью
               </a>
-            </Button>
+            </div>
           ) : (
             <p className="text-center text-sm text-muted-foreground">
               Корпоративный вход временно недоступен

@@ -558,12 +558,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     const authorizationUrl = new URL(oidcAuthorizationUrl);
+    const requestedAccountSwitch = String(req.query.account || "") === "other";
     authorizationUrl.search = new URLSearchParams({
       response_type: "code",
       client_id: oidcClientId,
       redirect_uri: oidcRedirectUri(req),
       scope: oidcScope,
-      prompt: oidcPrompt,
+      prompt: requestedAccountSwitch ? "login" : oidcPrompt,
       state,
       nonce,
       code_challenge: codeChallenge,

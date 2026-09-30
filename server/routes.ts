@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash, randomBytes, randomUUID } from "crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import ExcelJS from "exceljs";
 import { sql } from "drizzle-orm";
@@ -26,6 +26,45 @@ import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
+  const oauthCookieName = "tripplanner_oauth_tx";
+  const oauthCookieKey = createHash("sha256")
+    .update(process.env.SESSION_SECRET || "dev-secret-key")
+    .digest();
+
+  function encryptOAuthTransaction(transaction: { state: string; nonce: string; codeVerifier: string }) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", oauthCookieKey, iv);
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(transaction), "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return [iv, encrypted, tag].map((part) => part.toString("base64url")).join(".");
+  }
+
+  function decryptOAuthTransaction(value: string | undefined) {
+    if (!value) return undefined;
+    try {
+      const [ivValue, encryptedValue, tagValue] = value.split(".");
+      if (!ivValue || !encryptedValue || !tagValue) return undefined;
+      const decipher = createDecipheriv("aes-256-gcm", oauthCookieKey, Buffer.from(ivValue, "base64url"));
+      decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(encryptedValue, "base64url")),
+        decipher.final(),
+      ]).toString("utf8");
+      const transaction = JSON.parse(decrypted) as { state?: string; nonce?: string; codeVerifier?: string };
+      if (!transaction.state || !transaction.nonce || !transaction.codeVerifier) return undefined;
+      return transaction as { state: string; nonce: string; codeVerifier: string };
+    } catch {
+      return undefined;
+    }
+  }
+
+  function readCookie(req: any, name: string) {
+    const header = String(req.headers.cookie || "");
+    const prefix = `${name}=`;
+    const value = header.split(";").map((part: string) => part.trim()).find((part: string) => part.startsWith(prefix));
+    return value ? decodeURIComponent(value.slice(prefix.length)) : undefined;
+  }
+
   type CredentialBroadcastStatus = "idle" | "running" | "completed" | "interrupted";
   type CredentialBroadcastProgress = {
     status: CredentialBroadcastStatus;
@@ -500,6 +539,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     req.session.oidcState = state;
     req.session.oidcNonce = nonce;
     req.session.oidcCodeVerifier = codeVerifier;
+    res.cookie(oauthCookieName, encryptOAuthTransaction({ state, nonce, codeVerifier }), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 10 * 60 * 1000,
+      path: "/api/auth/yandex",
+    });
 
     const authorizationUrl = new URL(oidcAuthorizationUrl);
     authorizationUrl.search = new URLSearchParams({
@@ -526,12 +572,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
     const { code, state, error } = req.query as Record<string, string | undefined>;
     if (error) return res.redirect(authErrorRedirect("Вход через Яндекс был отменен"));
-    if (!code || !state || state !== req.session.oidcState) {
+    const oauthTransaction = decryptOAuthTransaction(readCookie(req, oauthCookieName));
+    const transaction = oauthTransaction && oauthTransaction.state === state ? oauthTransaction : undefined;
+    const sessionMatches = Boolean(state && state === req.session.oidcState);
+    if (!code || !state || (!sessionMatches && !transaction)) {
       return res.redirect(authErrorRedirect("Неверная или устаревшая сессия корпоративного входа"));
     }
 
-    const codeVerifier = req.session.oidcCodeVerifier;
-    const nonce = req.session.oidcNonce;
+    const codeVerifier = transaction?.codeVerifier || req.session.oidcCodeVerifier;
+    const nonce = transaction?.nonce || req.session.oidcNonce;
+    res.clearCookie(oauthCookieName, { path: "/api/auth/yandex" });
     delete req.session.oidcState;
     delete req.session.oidcNonce;
     delete req.session.oidcCodeVerifier;

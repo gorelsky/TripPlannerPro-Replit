@@ -36,7 +36,10 @@ function getYandexConnectionString(): string {
   const user = encodeURIComponent(required("YANDEX_PG_USER", process.env.YANDEX_PG_USER));
   const password = encodeURIComponent(required("YANDEX_PG_PASSWORD", process.env.YANDEX_PG_PASSWORD));
 
-  return `postgresql://${user}:${password}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
+  // TLS is configured explicitly through the `ssl` option below. Keeping
+  // sslmode=require in the URL makes newer node-postgres versions reinterpret
+  // the connection as certificate-verified and reject Yandex's CA chain.
+  return `postgresql://${user}:${password}@${host}:${port}/${encodeURIComponent(database)}`;
 }
 
 export function getDatabaseConfig(): DatabaseConfig {

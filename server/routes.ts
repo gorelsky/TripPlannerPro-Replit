@@ -456,13 +456,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ AUTH ============
 
-  const oidcIssuer = process.env.OIDC_ISSUER?.trim() || "https://auth.yandex.cloud";
+  const oidcIssuer = process.env.OIDC_ISSUER?.trim() || "https://oauth.yandex.ru";
   const oidcClientId = process.env.OIDC_CLIENT_ID?.trim();
-  const oidcAuthorizationUrl = process.env.OIDC_AUTHORIZATION_URL?.trim() || `${oidcIssuer}/oauth/authorize`;
-  const oidcTokenUrl = process.env.OIDC_TOKEN_URL?.trim() || `${oidcIssuer}/oauth/token`;
-  const oidcUserInfoUrl = process.env.OIDC_USERINFO_URL?.trim() || `${oidcIssuer}/oauth/userinfo`;
+  const isYandexOAuth = oidcIssuer.includes("oauth.yandex.ru");
+  const oidcAuthorizationUrl = process.env.OIDC_AUTHORIZATION_URL?.trim() || `${oidcIssuer}/authorize`;
+  const oidcTokenUrl = process.env.OIDC_TOKEN_URL?.trim() || `${oidcIssuer}/token`;
+  const oidcUserInfoUrl = process.env.OIDC_USERINFO_URL?.trim() || "https://login.yandex.ru/info?format=json";
   const oidcJwksUrl = process.env.OIDC_JWKS_URL?.trim() || `${oidcIssuer}/oauth/jwks/keys`;
-  const oidcScope = process.env.OIDC_SCOPE?.trim() || "openid email profile";
+  const oidcScope = process.env.OIDC_SCOPE?.trim() || (isYandexOAuth ? "login:email login:info" : "openid email profile");
   const oidcJwks = createRemoteJWKSet(new URL(oidcJwksUrl));
 
   function base64Url(value: Buffer) {
@@ -543,16 +544,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${tokenResponse.status}`);
       const tokens = await tokenResponse.json() as { id_token?: string; access_token?: string };
-      if (!tokens.id_token || !tokens.access_token) throw new Error("OIDC tokens are missing");
+      if (!tokens.access_token) throw new Error("OAuth access token is missing");
 
-      const verified = await jwtVerify(tokens.id_token, oidcJwks as any, {
-        issuer: oidcIssuer,
-        audience: oidcClientId,
-      });
-      const claims = verified.payload as Record<string, unknown>;
-      if (claims.nonce !== nonce) throw new Error("OIDC nonce validation failed");
+      let claims: Record<string, unknown> = {};
+      if (tokens.id_token) {
+        const verified = await jwtVerify(tokens.id_token, oidcJwks as any, {
+          issuer: oidcIssuer,
+          audience: oidcClientId,
+        });
+        claims = verified.payload as Record<string, unknown>;
+        if (claims.nonce !== nonce) throw new Error("OIDC nonce validation failed");
+      }
       const userInfoResponse = await fetch(oidcUserInfoUrl, {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
+        headers: { Authorization: `${isYandexOAuth ? "OAuth" : "Bearer"} ${tokens.access_token}` },
       });
       if (!userInfoResponse.ok) throw new Error(`Userinfo request failed: ${userInfoResponse.status}`);
       const userInfo = await userInfoResponse.json() as Record<string, unknown>;

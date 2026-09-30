@@ -73,13 +73,16 @@ if (!sessionSecret || (process.env.NODE_ENV === "production" && sessionSecret.le
 
 app.use(session({
   secret: sessionSecret,
+  proxy: process.env.NODE_ENV === "production",
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
   name: "connect.sid",
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: "lax",
+    // OAuth returns from an external Yandex origin; allow the callback cookie
+    // to be sent back to the application over HTTPS.
+    sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
     httpOnly: true,
     path: "/",

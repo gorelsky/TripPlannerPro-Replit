@@ -471,7 +471,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function oidcRedirectUri(req: any) {
-    return process.env.OIDC_REDIRECT_URI?.trim() || `${req.protocol}://${req.get("host")}/api/auth/yandex/callback`;
+    const configuredRedirectUri = process.env.OIDC_REDIRECT_URI?.trim();
+    if (configuredRedirectUri) return configuredRedirectUri;
+
+    // Serverless proxies can expose the incoming request as HTTP even when the
+    // browser connected over HTTPS. Build the callback from forwarded headers.
+    const forwardedProto = String(req.get("x-forwarded-proto") || "").split(",")[0].trim();
+    const protocol = forwardedProto || req.protocol || "https";
+    const host = req.get("x-forwarded-host") || req.get("host");
+    return `${protocol}://${host}/api/auth/yandex/callback`;
   }
 
   function authErrorRedirect(message: string) {

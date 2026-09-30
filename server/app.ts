@@ -49,6 +49,23 @@ export const sessionStore = new PostgresSessionStore({
   tableName: "trip_planner_sessions",
   createTableIfMissing: true,
 });
+
+// Create the session table before the first request. This is important for
+// Yandex Managed PostgreSQL, where the store's lazy table creation can race
+// with the first OAuth session write or fail without a useful request error.
+async function ensureSessionStoreTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trip_planner_sessions (
+      sid varchar(255) NOT NULL PRIMARY KEY,
+      sess json NOT NULL,
+      expire timestamp(6) NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS trip_planner_sessions_expire_idx
+    ON trip_planner_sessions (expire)
+  `);
+}
 const sessionSecret = process.env.SESSION_SECRET || (process.env.NODE_ENV === "production" ? undefined : "dev-secret-key");
 if (!sessionSecret || (process.env.NODE_ENV === "production" && sessionSecret.length < 32)) {
   throw new Error("SESSION_SECRET must be configured with at least 32 characters in production");
@@ -119,6 +136,7 @@ app.use((req, res, next) => {
 export default async function runApp(
   setup: (app: Express, server: Server) => Promise<void>,
 ) {
+  await ensureSessionStoreTable();
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

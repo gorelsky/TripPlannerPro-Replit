@@ -2,7 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const defaultProductionAssetOrigin = "https://bba24tqeknn5rjnjom8k.containers.yandexcloud.net";
+// Railway is the default production target for this repository. The Yandex
+// Cloud deployment overrides it with PUBLIC_ASSET_ORIGIN at build time.
+const defaultProductionAssetOrigin = "https://tripplanner-sls.up.railway.app";
 
 function getProductionAssetBase() {
   const configuredOrigin =

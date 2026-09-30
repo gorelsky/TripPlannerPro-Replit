@@ -477,7 +477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Serverless proxies can expose the incoming request as HTTP even when the
     // browser connected over HTTPS. Build the callback from forwarded headers.
     const forwardedProto = String(req.get("x-forwarded-proto") || "").split(",")[0].trim();
-    const protocol = forwardedProto || req.protocol || "https";
+    const protocol = forwardedProto || (process.env.NODE_ENV === "production" ? "https" : req.protocol || "https");
     const host = req.get("x-forwarded-host") || req.get("host");
     return `${protocol}://${host}/api/auth/yandex/callback`;
   }

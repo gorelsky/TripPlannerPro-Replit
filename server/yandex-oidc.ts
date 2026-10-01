@@ -37,8 +37,9 @@ export function isYandexOidcEnabled(): boolean {
 
 async function getConfig(): Promise<OidcConfig> {
   const issuer = (process.env.OIDC_ISSUER || "https://auth.yandex.cloud").replace(/\/$/, "");
+  const legacyYandexOAuth = issuer.includes("oauth.yandex.ru");
   let metadata: Record<string, string> = {};
-  if (!process.env.OIDC_AUTHORIZATION_URL || !process.env.OIDC_TOKEN_URL || !process.env.OIDC_JWKS_URL) {
+  if (!legacyYandexOAuth && (!process.env.OIDC_AUTHORIZATION_URL || !process.env.OIDC_TOKEN_URL || !process.env.OIDC_JWKS_URL)) {
     const discovery = await fetch(`${issuer}/.well-known/openid-configuration`);
     if (!discovery.ok) throw new Error(`OIDC discovery failed: ${discovery.status}`);
     metadata = await discovery.json() as Record<string, string>;
@@ -47,12 +48,12 @@ async function getConfig(): Promise<OidcConfig> {
     clientId: required("OIDC_CLIENT_ID"),
     clientSecret: required("OIDC_CLIENT_SECRET"),
     issuer,
-    authorizationUrl: process.env.OIDC_AUTHORIZATION_URL || metadata.authorization_endpoint || required("OIDC_AUTHORIZATION_URL"),
-    tokenUrl: process.env.OIDC_TOKEN_URL || metadata.token_endpoint || required("OIDC_TOKEN_URL"),
-    userInfoUrl: process.env.OIDC_USERINFO_URL || metadata.userinfo_endpoint,
-    jwksUrl: process.env.OIDC_JWKS_URL || metadata.jwks_uri || required("OIDC_JWKS_URL"),
+    authorizationUrl: process.env.OIDC_AUTHORIZATION_URL || (legacyYandexOAuth ? "https://oauth.yandex.ru/authorize" : metadata.authorization_endpoint) || required("OIDC_AUTHORIZATION_URL"),
+    tokenUrl: process.env.OIDC_TOKEN_URL || (legacyYandexOAuth ? "https://oauth.yandex.ru/token" : metadata.token_endpoint) || required("OIDC_TOKEN_URL"),
+    userInfoUrl: process.env.OIDC_USERINFO_URL || (legacyYandexOAuth ? "https://login.yandex.ru/info?format=json" : metadata.userinfo_endpoint),
+    jwksUrl: process.env.OIDC_JWKS_URL || metadata.jwks_uri || (legacyYandexOAuth ? "https://oauth.yandex.ru/keys" : undefined) || required("OIDC_JWKS_URL"),
     redirectUri: required("OIDC_REDIRECT_URI"),
-    scope: process.env.OIDC_SCOPE || "openid email profile",
+    scope: process.env.OIDC_SCOPE || (legacyYandexOAuth ? "login:email login:info" : "openid email profile"),
   };
 }
 
@@ -132,11 +133,18 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   });
   if (!response.ok) throw new Error(`OIDC token exchange failed: ${response.status}`);
   const tokens = await response.json() as { id_token?: string; access_token?: string };
-  if (!tokens.id_token) throw new Error("OIDC response does not contain id_token");
-  const claims = await verifyIdToken(tokens.id_token, config, nonce);
-  if (!claims.email && tokens.access_token && config.userInfoUrl) {
-    const userInfo = await fetch(config.userInfoUrl, { headers: { Authorization: `Bearer ${tokens.access_token}` } });
-    if (userInfo.ok) Object.assign(claims, await userInfo.json());
+  let claims: OidcClaims;
+  if (tokens.id_token) {
+    claims = await verifyIdToken(tokens.id_token, config, nonce);
+  } else if (tokens.access_token && config.userInfoUrl) {
+    const authorizationScheme = config.issuer.includes("oauth.yandex.ru") ? "OAuth" : "Bearer";
+    const userInfo = await fetch(config.userInfoUrl, {
+      headers: { Authorization: `${authorizationScheme} ${tokens.access_token}` },
+    });
+    if (!userInfo.ok) throw new Error(`OIDC userinfo request failed: ${userInfo.status}`);
+    claims = await userInfo.json() as OidcClaims;
+  } else {
+    throw new Error("OAuth response does not contain a usable user profile");
   }
   if (!claims.email) throw new Error("Corporate email is missing in OIDC profile");
   return claims;

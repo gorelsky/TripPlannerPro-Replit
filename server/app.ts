@@ -80,9 +80,10 @@ app.use(session({
   name: "connect.sid",
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    // OAuth returns from an external Yandex origin; allow the callback cookie
-    // to be sent back to the application over HTTPS.
-    sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",
+    // The OAuth callback is a top-level GET back to this site. Lax keeps the
+    // session cookie available during that return without relying on
+    // cross-site cookie exceptions in the browser.
+    sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
     httpOnly: true,
     path: "/",
@@ -97,6 +98,7 @@ declare module 'express-session' {
     oidcState?: string;
     oidcNonce?: string;
     oidcCodeVerifier?: string;
+    oidcReturnTo?: string;
   }
 }
 

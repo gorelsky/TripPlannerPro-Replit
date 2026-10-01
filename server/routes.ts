@@ -2,8 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import fs from "node:fs";
 import path from "node:path";
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "crypto";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
@@ -23,47 +22,15 @@ import {
 import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
+import {
+  buildAuthorizationUrl,
+  createOidcTransaction,
+  exchangeCode,
+  isYandexOidcEnabled,
+} from "./yandex-oidc";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const attachmentsDir = path.resolve(import.meta.dirname, "..", "uploads", "contact-screenshots");
-  const oauthCookieName = "tripplanner_oauth_tx";
-  const oauthCookieKey = createHash("sha256")
-    .update(process.env.SESSION_SECRET || "dev-secret-key")
-    .digest();
-
-  function encryptOAuthTransaction(transaction: { state: string; nonce: string; codeVerifier: string }) {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", oauthCookieKey, iv);
-    const encrypted = Buffer.concat([cipher.update(JSON.stringify(transaction), "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return [iv, encrypted, tag].map((part) => part.toString("base64url")).join(".");
-  }
-
-  function decryptOAuthTransaction(value: string | undefined) {
-    if (!value) return undefined;
-    try {
-      const [ivValue, encryptedValue, tagValue] = value.split(".");
-      if (!ivValue || !encryptedValue || !tagValue) return undefined;
-      const decipher = createDecipheriv("aes-256-gcm", oauthCookieKey, Buffer.from(ivValue, "base64url"));
-      decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
-      const decrypted = Buffer.concat([
-        decipher.update(Buffer.from(encryptedValue, "base64url")),
-        decipher.final(),
-      ]).toString("utf8");
-      const transaction = JSON.parse(decrypted) as { state?: string; nonce?: string; codeVerifier?: string };
-      if (!transaction.state || !transaction.nonce || !transaction.codeVerifier) return undefined;
-      return transaction as { state: string; nonce: string; codeVerifier: string };
-    } catch {
-      return undefined;
-    }
-  }
-
-  function readCookie(req: any, name: string) {
-    const header = String(req.headers.cookie || "");
-    const prefix = `${name}=`;
-    const value = header.split(";").map((part: string) => part.trim()).find((part: string) => part.startsWith(prefix));
-    return value ? decodeURIComponent(value.slice(prefix.length)) : undefined;
-  }
 
   type CredentialBroadcastStatus = "idle" | "running" | "completed" | "interrupted";
   type CredentialBroadcastProgress = {
@@ -495,37 +462,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ AUTH ============
 
-  const oidcIssuer = process.env.OIDC_ISSUER?.trim() || "https://auth.yandex.cloud";
-  const oidcClientId = process.env.OIDC_CLIENT_ID?.trim();
-  const isYandexOAuth = oidcIssuer.includes("oauth.yandex.ru");
-  const oidcAuthorizationUrl = process.env.OIDC_AUTHORIZATION_URL?.trim() || `${oidcIssuer}/oauth/authorize`;
-  const oidcTokenUrl = process.env.OIDC_TOKEN_URL?.trim() || `${oidcIssuer}/oauth/token`;
-  const oidcUserInfoUrl = process.env.OIDC_USERINFO_URL?.trim() || (isYandexOAuth
-    ? "https://login.yandex.ru/info?format=json"
-    : `${oidcIssuer}/oauth/userinfo`);
-  const oidcJwksUrl = process.env.OIDC_JWKS_URL?.trim() || `${oidcIssuer}/oauth/jwks/keys`;
-  const oidcScope = process.env.OIDC_SCOPE?.trim() || (isYandexOAuth ? "login:email login:info" : "openid email profile");
-  const oidcPrompt = process.env.OIDC_PROMPT?.trim() || "select_account";
-  const oidcJwks = createRemoteJWKSet(new URL(oidcJwksUrl));
-
-  function base64Url(value: Buffer) {
-    return value.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  }
-
-  function oidcRedirectUri(req: any) {
-    const configuredRedirectUri = process.env.OIDC_REDIRECT_URI?.trim();
-    if (configuredRedirectUri) return configuredRedirectUri;
-
-    // Serverless proxies can expose the incoming request as HTTP even when the
-    // browser connected over HTTPS. Build the callback from forwarded headers.
-    const forwardedProto = String(req.get("x-forwarded-proto") || "").split(",")[0].trim();
-    const protocol = forwardedProto || (process.env.NODE_ENV === "production" ? "https" : req.protocol || "https");
-    const host = req.get("x-forwarded-host") || req.get("host");
-    return `${protocol}://${host}/api/auth/yandex/callback`;
-  }
-
   function authErrorRedirect(message: string) {
-    return `/?authError=${encodeURIComponent(message)}`;
+    return `/login?authError=${encodeURIComponent(message)}`;
   }
 
   function setAuthNoStore(res: any) {
@@ -535,123 +473,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/auth/yandex/status", (_req, res) => {
     setAuthNoStore(res);
-    res.json({ enabled: Boolean(oidcClientId) });
+    res.json({ enabled: isYandexOidcEnabled() });
   });
 
   app.get("/api/auth/yandex/start", (req, res) => {
     setAuthNoStore(res);
-    if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
-
-    const state = base64Url(randomBytes(32));
-    const nonce = base64Url(randomBytes(32));
-    const codeVerifier = base64Url(randomBytes(48));
-    const codeChallenge = base64Url(createHash("sha256").update(codeVerifier).digest());
-    req.session.oidcState = state;
-    req.session.oidcNonce = nonce;
-    req.session.oidcCodeVerifier = codeVerifier;
-    res.cookie(oauthCookieName, encryptOAuthTransaction({ state, nonce, codeVerifier }), {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 10 * 60 * 1000,
-      path: "/api/auth/yandex",
-    });
-
-    const authorizationUrl = new URL(oidcAuthorizationUrl);
+    if (!isYandexOidcEnabled()) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
+    const transaction = createOidcTransaction();
+    req.session.oidcState = transaction.state;
+    req.session.oidcNonce = transaction.nonce;
+    req.session.oidcCodeVerifier = transaction.verifier;
+    req.session.oidcReturnTo = "/";
     const requestedAccountSwitch = String(req.query.account || "") === "other";
-    authorizationUrl.search = new URLSearchParams({
-      response_type: "code",
-      client_id: oidcClientId,
-      redirect_uri: oidcRedirectUri(req),
-      scope: oidcScope,
-      prompt: requestedAccountSwitch ? "login" : oidcPrompt,
-      state,
-      nonce,
-      code_challenge: codeChallenge,
-      code_challenge_method: "S256",
-    }).toString();
-
-    req.session.save((error) => {
+    buildAuthorizationUrl(transaction, requestedAccountSwitch ? "login" : (process.env.OIDC_PROMPT?.trim() || "select_account"))
+      .then((authorizationUrl) => req.session.save((error) => {
       if (error) {
         console.error("[OIDC] Failed to save authorization session:", error);
         return res.redirect(authErrorRedirect("Не удалось начать корпоративный вход"));
       }
       res.redirect(authorizationUrl.toString());
-    });
+      }))
+      .catch((error) => {
+        console.error("[OIDC] Failed to build authorization URL:", error);
+        res.redirect(authErrorRedirect("Корпоративный вход временно недоступен"));
+      });
   });
 
   app.get("/api/auth/yandex/callback", async (req, res) => {
     setAuthNoStore(res);
-    if (!oidcClientId) return res.redirect(authErrorRedirect("Корпоративный вход пока не настроен"));
     const { code, state, error } = req.query as Record<string, string | undefined>;
     if (error) return res.redirect(authErrorRedirect("Вход через Яндекс был отменен"));
-    const oauthTransaction = decryptOAuthTransaction(readCookie(req, oauthCookieName));
-    const transaction = oauthTransaction && oauthTransaction.state === state ? oauthTransaction : undefined;
-    const sessionMatches = Boolean(state && state === req.session.oidcState);
-    if (!code || !state || (!sessionMatches && !transaction)) {
-      return res.redirect(authErrorRedirect("Неверная или устаревшая сессия корпоративного входа"));
-    }
-
-    const codeVerifier = transaction?.codeVerifier || req.session.oidcCodeVerifier;
-    const nonce = transaction?.nonce || req.session.oidcNonce;
-    res.clearCookie(oauthCookieName, { path: "/api/auth/yandex" });
+    const codeVerifier = req.session.oidcCodeVerifier;
+    const nonce = req.session.oidcNonce;
+    const expectedState = req.session.oidcState;
+    const returnTo = req.session.oidcReturnTo || "/";
     delete req.session.oidcState;
     delete req.session.oidcNonce;
     delete req.session.oidcCodeVerifier;
+    delete req.session.oidcReturnTo;
+    if (!code || !state || !expectedState || state !== expectedState || !codeVerifier || !nonce) {
+      return res.redirect(authErrorRedirect("Сессия входа истекла. Нажмите кнопку входа еще раз."));
+    }
 
     try {
-      if (!codeVerifier || !nonce) throw new Error("OIDC session data is missing");
-      const tokenResponse = await fetch(oidcTokenUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: oidcClientId,
-          ...(process.env.OIDC_CLIENT_SECRET ? { client_secret: process.env.OIDC_CLIENT_SECRET } : {}),
-          code,
-          redirect_uri: oidcRedirectUri(req),
-          code_verifier: codeVerifier,
-        }),
-      });
-      if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${tokenResponse.status}`);
-      const tokens = await tokenResponse.json() as { id_token?: string; access_token?: string };
-      if (!tokens.access_token) throw new Error("OAuth access token is missing");
-
-      let claims: Record<string, unknown> = {};
-      if (tokens.id_token) {
-        const verified = await jwtVerify(tokens.id_token, oidcJwks as any, {
-          issuer: oidcIssuer,
-          audience: oidcClientId,
-        });
-        claims = verified.payload as Record<string, unknown>;
-        if (claims.nonce !== nonce) throw new Error("OIDC nonce validation failed");
-      }
-      const userInfoResponse = await fetch(oidcUserInfoUrl, {
-        headers: { Authorization: `${isYandexOAuth ? "OAuth" : "Bearer"} ${tokens.access_token}` },
-      });
-      if (!userInfoResponse.ok) throw new Error(`Userinfo request failed: ${userInfoResponse.status}`);
-      const userInfo = await userInfoResponse.json() as Record<string, unknown>;
-      const email = String(userInfo.email || claims.email || "").trim().toLowerCase();
+      const claims = await exchangeCode(code, codeVerifier, nonce);
+      const email = String(claims.email || "").trim().toLowerCase();
       if (!email) throw new Error("Corporate email is missing");
 
       const user = await storage.getUserByEmail(email);
       if (!user) return res.redirect(authErrorRedirect("Пользователь не найден в списке доступа"));
       if (user.employmentStatus !== "active") return res.redirect(authErrorRedirect("Доступ пользователя отключен"));
 
+      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
       req.session.userId = user.id;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-      return res.redirect("/");
+      return res.redirect(returnTo);
     } catch (callbackError) {
       console.error("[OIDC] Callback failed:", callbackError);
       return res.redirect(authErrorRedirect("Не удалось выполнить корпоративный вход"));
     }
   });
   
-  // Локальный вход по паролю отключен: приложение использует только OIDC Яндекс 360.
-  app.post("/api/auth/login", (_req, res) => {
+  // Локальный парольный вход оставлен только для отдельной учетной записи администратора.
+  app.post("/api/auth/admin-login", async (req, res) => {
     setAuthNoStore(res);
-    res.status(410).json({ error: "Локальный вход отключен. Используйте корпоративный вход через Яндекс 360." });
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    if (!email || !password) return res.status(400).json({ error: "Введите логин и пароль администратора" });
+    const user = await storage.validatePassword(email, password);
+    if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
+    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
+    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+    req.session.userId = user.id;
+    await startLoginSession(req, user);
+    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+    res.json({ success: true });
   });
 
   // Logout

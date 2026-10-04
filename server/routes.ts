@@ -535,38 +535,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Локальный парольный вход оставлен только для отдельной учетной записи администратора.
+  // Локальный парольный вход отключен: все пользователи, включая администратора,
+  // входят только через корпоративную учетную запись Яндекс 360.
   app.post("/api/auth/admin-login", async (req, res) => {
     setAuthNoStore(res);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) return res.status(400).json({ error: "Введите логин и пароль администратора" });
-    const user = await storage.validatePassword(email, password);
-    if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
-    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
-    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
-    req.session.userId = user.id;
-    await startLoginSession(req, user);
-    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-    res.json({ success: true });
+    res.status(410).json({ error: "Используйте вход через Яндекс 360" });
   });
 
-  // Резервный вход сотрудников по email и паролю из trip_planner_users.
-  // Администратор использует отдельную форму выше.
+  // Локальный парольный вход отключен: парольная авторизация не используется.
   app.post("/api/auth/password-login", async (req, res) => {
     setAuthNoStore(res);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) return res.status(400).json({ error: "Введите email и пароль" });
-    const user = await storage.validatePassword(email, password);
-    if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
-    if (user.role === "admin") return res.status(403).json({ error: "Для администратора используйте отдельный вход" });
-    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
-    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
-    req.session.userId = user.id;
-    await startLoginSession(req, user);
-    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-    res.json({ success: true });
+    res.status(410).json({ error: "Используйте вход через Яндекс 360" });
   });
 
   // Logout

@@ -551,6 +551,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
+  // Резервный вход сотрудников по email и паролю из trip_planner_users.
+  // Администратор использует отдельную форму выше.
+  app.post("/api/auth/password-login", async (req, res) => {
+    setAuthNoStore(res);
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    if (!email || !password) return res.status(400).json({ error: "Введите email и пароль" });
+    const user = await storage.validatePassword(email, password);
+    if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
+    if (user.role === "admin") return res.status(403).json({ error: "Для администратора используйте отдельный вход" });
+    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
+    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+    req.session.userId = user.id;
+    await startLoginSession(req, user);
+    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+    res.json({ success: true });
+  });
+
   // Logout
   app.post("/api/auth/logout", async (req, res) => {
     setAuthNoStore(res);

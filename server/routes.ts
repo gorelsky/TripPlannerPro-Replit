@@ -517,7 +517,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const claims = await exchangeCode(code, codeVerifier, nonce);
-      const email = String(claims.email || "").trim().toLowerCase();
+      const email = String(claims.email || claims.default_email || "").trim().toLowerCase();
       if (!email) throw new Error("Corporate email is missing");
 
       const user = await storage.getUserByEmail(email);

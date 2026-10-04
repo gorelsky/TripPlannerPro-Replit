@@ -14,7 +14,8 @@ type OidcConfig = {
 
 export type OidcClaims = {
   sub: string;
-  email: string;
+  email?: string;
+  default_email?: string;
   name?: string;
   nonce?: string;
   iss?: string;
@@ -146,6 +147,8 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   } else {
     throw new Error("OAuth response does not contain a usable user profile");
   }
-  if (!claims.email) throw new Error("Corporate email is missing in OIDC profile");
+  const normalizedEmail = String(claims.email || claims.default_email || "").trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("Corporate email is missing in OIDC profile");
+  claims.email = normalizedEmail;
   return claims;
 }

@@ -45,5 +45,10 @@ export async function serveStatic(app: Express, _server: Server) {
 }
 
 (async () => {
-  await runApp(serveStatic);
+  try {
+    await runApp(serveStatic);
+  } catch (error) {
+    console.error("[STARTUP] TripPlanner failed before opening the HTTP port:", error);
+    process.exitCode = 1;
+  }
 })();

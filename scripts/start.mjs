@@ -16,6 +16,9 @@ migration.on("error", (error) => {
 
 migration.on("exit", (code, signal) => {
   if (signal || code !== 0) {
+    console.error(
+      `[STARTUP] Database migrations failed; TripPlanner was not started (code=${code ?? "none"}, signal=${signal ?? "none"}).`,
+    );
     process.exit(code ?? 1);
   }
 

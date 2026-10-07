@@ -43,7 +43,12 @@ function getYandexConnectionString(): string {
 }
 
 export function getDatabaseConfig(): DatabaseConfig {
-  const target = (process.env.DATABASE_TARGET?.trim().toLowerCase() || "supabase") as DatabaseTarget;
+  const configuredTarget = process.env.DATABASE_TARGET?.trim().toLowerCase();
+  if (!configuredTarget && process.env.NODE_ENV === "production") {
+    throw new Error("DATABASE_TARGET must be explicitly set to yandex or supabase in production");
+  }
+
+  const target = (configuredTarget || "supabase") as DatabaseTarget;
   if (target !== "supabase" && target !== "yandex") {
     throw new Error(`Unsupported DATABASE_TARGET: ${target}. Use supabase or yandex.`);
   }

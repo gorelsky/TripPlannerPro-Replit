@@ -10,7 +10,12 @@ dotenv.config({ override: true });
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(currentDirectory, "..", "migrations");
-const target = (process.env.DATABASE_TARGET || "supabase").trim().toLowerCase();
+const configuredTarget = process.env.DATABASE_TARGET?.trim().toLowerCase();
+if (!configuredTarget && process.env.NODE_ENV === "production") {
+  throw new Error("DATABASE_TARGET must be explicitly set to yandex or supabase in production");
+}
+
+const target = (configuredTarget || "supabase");
 let connectionString;
 let ssl = { rejectUnauthorized: false };
 
@@ -27,7 +32,7 @@ if (target === "yandex") {
       throw new Error("YANDEX_PG_HOST, YANDEX_PG_DATABASE, YANDEX_PG_USER and YANDEX_PG_PASSWORD are required");
     }
     const port = process.env.YANDEX_PG_PORT?.trim() || "6432";
-    connectionString = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
+    connectionString = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
   }
 
   const caFile = process.env.YANDEX_PG_SSL_CA_FILE?.trim();

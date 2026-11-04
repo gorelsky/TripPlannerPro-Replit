@@ -8,7 +8,7 @@ const databaseConfig = process.env.DRIZZLE_DATABASE_URL?.trim()
   ? {
       target: "supabase" as const,
       connectionString: process.env.DRIZZLE_DATABASE_URL.trim(),
-      ssl: { rejectUnauthorized: false },
+      ssl: { rejectUnauthorized: true },
     }
   : getDatabaseConfig();
 
@@ -24,6 +24,6 @@ export default defineConfig({
     user: decodeURIComponent(parsedDatabaseUrl.username),
     password: decodeURIComponent(parsedDatabaseUrl.password),
     database: parsedDatabaseUrl.pathname.replace(/^\//, ""),
-    ssl: "require",
+    ssl: databaseConfig.ssl,
   },
 });

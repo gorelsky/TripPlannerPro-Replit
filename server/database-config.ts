@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { X509Certificate } from "node:crypto";
 
 export type DatabaseTarget = "supabase" | "yandex";
 
@@ -17,13 +18,37 @@ function required(name: string, value: string | undefined): string {
   return normalized;
 }
 
-function readYandexCaFile(fileName: string | undefined): string | undefined {
-  if (!fileName?.trim()) return undefined;
+function readCaFile(fileName: string | undefined): string {
+  if (!fileName?.trim()) {
+    throw new Error(
+      "YANDEX_PG_SSL_CA_FILE is required for DATABASE_TARGET=yandex; provide the path to the Yandex Managed PostgreSQL CA certificate",
+    );
+  }
   const filePath = path.resolve(fileName.trim());
   if (!fs.existsSync(filePath)) {
     throw new Error(`YANDEX_PG_SSL_CA_FILE was not found: ${filePath}`);
   }
-  return fs.readFileSync(filePath, "utf8");
+  if (!fs.statSync(filePath).isFile()) {
+    throw new Error(`YANDEX_PG_SSL_CA_FILE is not a file: ${filePath}`);
+  }
+  const ca = fs.readFileSync(filePath, "utf8").trim();
+  if (!ca) {
+    throw new Error(`YANDEX_PG_SSL_CA_FILE is empty: ${filePath}`);
+  }
+  try {
+    new X509Certificate(ca);
+  } catch {
+    throw new Error(`YANDEX_PG_SSL_CA_FILE is not a valid PEM certificate: ${filePath}`);
+  }
+  return ca;
+}
+
+function removeSslParameters(connectionString: string): string {
+  const parsed = new URL(connectionString);
+  for (const parameter of ["sslmode", "sslrootcert", "sslcert", "sslkey"]) {
+    parsed.searchParams.delete(parameter);
+  }
+  return parsed.toString();
 }
 
 function getYandexConnectionString(): string {
@@ -54,11 +79,11 @@ export function getDatabaseConfig(): DatabaseConfig {
   }
 
   if (target === "yandex") {
-    const ca = readYandexCaFile(process.env.YANDEX_PG_SSL_CA_FILE);
+    const ca = readCaFile(process.env.YANDEX_PG_SSL_CA_FILE);
     return {
       target,
-      connectionString: getYandexConnectionString(),
-      ssl: ca ? { rejectUnauthorized: true, ca } : { rejectUnauthorized: false },
+      connectionString: removeSslParameters(getYandexConnectionString()),
+      ssl: { rejectUnauthorized: true, ca },
     };
   }
 
@@ -69,7 +94,7 @@ export function getDatabaseConfig(): DatabaseConfig {
 
   return {
     target,
-    connectionString,
-    ssl: { rejectUnauthorized: false },
+    connectionString: removeSslParameters(connectionString.trim()),
+    ssl: { rejectUnauthorized: true },
   };
 }

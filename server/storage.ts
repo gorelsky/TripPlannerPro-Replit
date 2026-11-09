@@ -376,6 +376,27 @@ export class PostgresStorage implements IStorage {
         console.log(`[INIT] Bootstrap administrator created: ${bootstrapAdmin.email}`);
       }
 
+      // Allow an explicit one-time password reset for an existing bootstrap admin.
+      // The flag is intentionally opt-in so changing BOOTSTRAP_ADMIN_PASSWORD alone
+      // never overwrites an existing user's password on every container restart.
+      if (
+        process.env.BOOTSTRAP_ADMIN_RESET_PASSWORD?.trim().toLowerCase() === "true" &&
+        process.env.BOOTSTRAP_ADMIN_EMAIL &&
+        process.env.BOOTSTRAP_ADMIN_PASSWORD
+      ) {
+        const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
+        const existingAdmin = await this.getUserByEmail(adminEmail);
+        if (existingAdmin?.role === "admin") {
+          await db
+            .update(users)
+            .set({ password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD) })
+            .where(eq(users.id, existingAdmin.id));
+          console.log(`[INIT] Bootstrap administrator password reset: ${adminEmail}`);
+        } else {
+          console.warn(`[INIT] Password reset skipped: admin not found for ${adminEmail}`);
+        }
+      }
+
       // Create cities if not exist
       const citiesCount = await db.select().from(cities);
       if (citiesCount.length === 0) {
@@ -948,3 +969,4 @@ export class PostgresStorage implements IStorage {
 }
 
 export const storage = new PostgresStorage();
+

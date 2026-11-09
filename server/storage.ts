@@ -376,6 +376,36 @@ export class PostgresStorage implements IStorage {
         console.log(`[INIT] Bootstrap administrator created: ${bootstrapAdmin.email}`);
       }
 
+      // Ensure the configured bootstrap administrator exists even when the
+      // database already contains other users but was restored without admin.
+      if (process.env.BOOTSTRAP_ADMIN_EMAIL && process.env.BOOTSTRAP_ADMIN_PASSWORD) {
+        const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
+        const [configuredAdmin] = await db
+          .select()
+          .from(users)
+          .where(sql`lower(trim(${users.email})) = ${adminEmail}`)
+          .limit(1);
+        if (!configuredAdmin) {
+          const bootstrapAdmin = {
+            id: randomUUID(),
+            fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
+            email: adminEmail,
+            password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
+            role: "admin" as const,
+            jobTitle: "Администратор",
+            userType: "manager" as const,
+            managerId: null,
+            managerName: null,
+            department: null,
+            homeCityId: null,
+            employmentStatus: "active" as const,
+            createdAt: new Date(),
+          };
+          await db.insert(users).values(bootstrapAdmin as any);
+          console.log(`[INIT] Bootstrap administrator restored: ${adminEmail}`);
+        }
+      }
+
       // Allow an explicit one-time password reset for an existing bootstrap admin.
       // The flag is intentionally opt-in so changing BOOTSTRAP_ADMIN_PASSWORD alone
       // never overwrites an existing user's password on every container restart.
@@ -390,7 +420,7 @@ export class PostgresStorage implements IStorage {
         const [existingAdmin] = await db
           .select()
           .from(users)
-          .where(eq(users.email, adminEmail))
+          .where(sql`lower(trim(${users.email})) = ${adminEmail}`)
           .limit(1);
         if (existingAdmin?.role === "admin") {
           await db
@@ -461,7 +491,12 @@ export class PostgresStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     await this.initializationReady;
-    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const normalizedEmail = email.trim().toLowerCase();
+    const result = await db
+      .select()
+      .from(users)
+      .where(sql`lower(trim(${users.email})) = ${normalizedEmail}`)
+      .limit(1);
     return result[0];
   }
 

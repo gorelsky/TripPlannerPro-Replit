@@ -553,7 +553,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userEmail = user.email;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-      res.locals.setFallbackAuthCookie(res, user.id);
+      res.locals.setFallbackAuthCookie(res, user.id, user.email);
       return res.json({ success: true });
     } catch (error) {
       console.error("[AUTH] Admin login session error:", error);
@@ -577,7 +577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userEmail = user.email;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-      res.locals.setFallbackAuthCookie(res, user.id);
+      res.locals.setFallbackAuthCookie(res, user.id, user.email);
       return res.json({ success: true });
     } catch (error) {
       console.error("[AUTH] Password login session error:", error);

@@ -98,13 +98,14 @@ app.use(session({
 // cookie as a fallback so a successful login is not immediately lost.
 const fallbackAuthCookie = "trip_planner_auth";
 const authSigningSecret = sessionSecret as string;
-function signFallbackAuth(userId: string): string {
-  const payload = Buffer.from(userId, "utf8").toString("base64url");
+function signFallbackAuth(userId: string, email?: string): string {
+  const payloadValue = JSON.stringify({ id: userId, email: email?.trim().toLowerCase() || undefined });
+  const payload = Buffer.from(payloadValue, "utf8").toString("base64url");
   const signature = createHmac("sha256", authSigningSecret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
-function verifyFallbackAuth(value: string): string | undefined {
+function verifyFallbackAuth(value: string): { id: string; email?: string } | undefined {
   const [payload, signature] = value.split(".");
   if (!payload || !signature) return undefined;
   const expected = createHmac("sha256", authSigningSecret).update(payload).digest("base64url");
@@ -112,8 +113,17 @@ function verifyFallbackAuth(value: string): string | undefined {
   const expectedBuffer = Buffer.from(expected);
   if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return undefined;
   try {
-    const userId = Buffer.from(payload, "base64url").toString("utf8");
-    return userId || undefined;
+    const decoded = Buffer.from(payload, "base64url").toString("utf8");
+    try {
+      const parsed = JSON.parse(decoded) as { id?: unknown; email?: unknown };
+      if (typeof parsed.id === "string" && parsed.id) {
+        return { id: parsed.id, email: typeof parsed.email === "string" ? parsed.email : undefined };
+      }
+    } catch {
+      // Accept cookies from the previous format during the transition.
+      if (decoded) return { id: decoded };
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -124,8 +134,8 @@ function getCookieValue(header: string | undefined, name: string): string | unde
   return item ? decodeURIComponent(item.slice(name.length + 1)) : undefined;
 }
 
-function appendFallbackAuthCookie(res: Response, userId: string) {
-  res.append("Set-Cookie", `${fallbackAuthCookie}=${encodeURIComponent(signFallbackAuth(userId))}; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax`);
+function appendFallbackAuthCookie(res: Response, userId: string, email?: string) {
+  res.append("Set-Cookie", `${fallbackAuthCookie}=${encodeURIComponent(signFallbackAuth(userId, email))}; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax`);
 }
 
 function clearFallbackAuthCookie(res: Response) {
@@ -134,8 +144,12 @@ function clearFallbackAuthCookie(res: Response) {
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (!req.session.userId) {
-    const fallbackUserId = getCookieValue(req.headers.cookie, fallbackAuthCookie);
-    if (fallbackUserId && verifyFallbackAuth(fallbackUserId)) req.session.userId = fallbackUserId;
+    const fallbackValue = getCookieValue(req.headers.cookie, fallbackAuthCookie);
+    const fallbackAuth = fallbackValue ? verifyFallbackAuth(fallbackValue) : undefined;
+    if (fallbackAuth) {
+      req.session.userId = fallbackAuth.id;
+      if (fallbackAuth.email) req.session.userEmail = fallbackAuth.email;
+    }
   }
   res.locals.setFallbackAuthCookie = appendFallbackAuthCookie;
   res.locals.clearFallbackAuthCookie = clearFallbackAuthCookie;
@@ -146,7 +160,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 declare module 'express-session' {
   interface SessionData {
     userId: string;
-    userEmail?: string;
     userEmail?: string;
     loginSessionId?: string;
     oidcState?: string;

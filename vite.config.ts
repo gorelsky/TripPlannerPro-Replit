@@ -2,19 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-// Railway is the default production target for this repository. The Yandex
-// Cloud deployment overrides it with PUBLIC_ASSET_ORIGIN at build time.
-const defaultProductionAssetOrigin = "https://tripplanner-sls.up.railway.app";
-
-function getProductionAssetBase() {
-  const configuredOrigin =
-    process.env.PUBLIC_ASSET_ORIGIN?.trim() || defaultProductionAssetOrigin;
-
-  return `${configuredOrigin.replace(/\/+$/, "")}/`;
-}
-
 export default defineConfig(({ command }) => ({
-  base: command === "build" ? getProductionAssetBase() : "/",
+  // Keep production assets on the same host as the application. This makes
+  // the Yandex Cloud deployment independent from the Railway fallback.
+  base: "/",
   plugins: [react()],
   resolve: {
     alias: {
@@ -35,3 +26,4 @@ export default defineConfig(({ command }) => ({
     },
   },
 }));
+

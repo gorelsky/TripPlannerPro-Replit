@@ -134,19 +134,25 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   });
   if (!response.ok) throw new Error(`OIDC token exchange failed: ${response.status}`);
   const tokens = await response.json() as { id_token?: string; access_token?: string };
-  let claims: OidcClaims;
+  let claims: OidcClaims | undefined;
   if (tokens.id_token) {
     claims = await verifyIdToken(tokens.id_token, config, nonce);
-  } else if (tokens.access_token && config.userInfoUrl) {
+  }
+
+  // Yandex Identity Hub may issue a valid ID token without email. In that
+  // case, use the access token to retrieve the profile before matching the
+  // account to the application's access list.
+  if ((!claims?.email && !claims?.default_email) && tokens.access_token && config.userInfoUrl) {
     const authorizationScheme = config.issuer.includes("oauth.yandex.ru") ? "OAuth" : "Bearer";
     const userInfo = await fetch(config.userInfoUrl, {
       headers: { Authorization: `${authorizationScheme} ${tokens.access_token}` },
     });
     if (!userInfo.ok) throw new Error(`OIDC userinfo request failed: ${userInfo.status}`);
-    claims = await userInfo.json() as OidcClaims;
-  } else {
-    throw new Error("OAuth response does not contain a usable user profile");
+    const profile = await userInfo.json() as OidcClaims;
+    claims = { ...claims, ...profile };
   }
+
+  if (!claims) throw new Error("OAuth response does not contain a usable user profile");
   const normalizedEmail = String(claims.email || claims.default_email || "").trim().toLowerCase();
   if (!normalizedEmail) throw new Error("Corporate email is missing in OIDC profile");
   claims.email = normalizedEmail;

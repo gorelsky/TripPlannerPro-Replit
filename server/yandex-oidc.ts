@@ -23,6 +23,12 @@ export type OidcClaims = {
   exp?: number;
 };
 
+const OIDC_REQUEST_TIMEOUT_MS = 15_000;
+
+function oidcTimeoutSignal() {
+  return AbortSignal.timeout(OIDC_REQUEST_TIMEOUT_MS);
+}
+
 const base64Url = (value: Buffer | string) =>
   Buffer.from(value).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 
@@ -123,6 +129,7 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   const response = await fetch(config.tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    signal: oidcTimeoutSignal(),
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -145,6 +152,7 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   if ((!claims?.email && !claims?.default_email) && tokens.access_token && config.userInfoUrl) {
     const authorizationScheme = config.issuer.includes("oauth.yandex.ru") ? "OAuth" : "Bearer";
     const userInfo = await fetch(config.userInfoUrl, {
+      signal: oidcTimeoutSignal(),
       headers: { Authorization: `${authorizationScheme} ${tokens.access_token}` },
     });
     if (!userInfo.ok) throw new Error(`OIDC userinfo request failed: ${userInfo.status}`);

@@ -146,6 +146,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 declare module 'express-session' {
   interface SessionData {
     userId: string;
+    userEmail?: string;
     loginSessionId?: string;
     oidcState?: string;
     oidcNonce?: string;

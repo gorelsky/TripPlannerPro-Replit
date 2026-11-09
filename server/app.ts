@@ -147,6 +147,7 @@ declare module 'express-session' {
   interface SessionData {
     userId: string;
     userEmail?: string;
+    userEmail?: string;
     loginSessionId?: string;
     oidcState?: string;
     oidcNonce?: string;

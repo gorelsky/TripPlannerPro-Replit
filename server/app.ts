@@ -8,6 +8,7 @@ import express, {
 } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { pool } from "./db";
 import { registerRoutes } from "./routes";
@@ -91,6 +92,55 @@ app.use(session({
     path: "/",
   },
 }));
+
+// Yandex Serverless Containers can occasionally drop the PostgreSQL session
+// cookie between two sequential requests. Keep a signed, short-lived user-id
+// cookie as a fallback so a successful login is not immediately lost.
+const fallbackAuthCookie = "trip_planner_auth";
+const authSigningSecret = sessionSecret as string;
+function signFallbackAuth(userId: string): string {
+  const payload = Buffer.from(userId, "utf8").toString("base64url");
+  const signature = createHmac("sha256", authSigningSecret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyFallbackAuth(value: string): string | undefined {
+  const [payload, signature] = value.split(".");
+  if (!payload || !signature) return undefined;
+  const expected = createHmac("sha256", authSigningSecret).update(payload).digest("base64url");
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return undefined;
+  try {
+    const userId = Buffer.from(payload, "base64url").toString("utf8");
+    return userId || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getCookieValue(header: string | undefined, name: string): string | undefined {
+  const item = header?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
+  return item ? decodeURIComponent(item.slice(name.length + 1)) : undefined;
+}
+
+function appendFallbackAuthCookie(res: Response, userId: string) {
+  res.append("Set-Cookie", `${fallbackAuthCookie}=${encodeURIComponent(signFallbackAuth(userId))}; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax`);
+}
+
+function clearFallbackAuthCookie(res: Response) {
+  res.append("Set-Cookie", `${fallbackAuthCookie}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`);
+}
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (!req.session.userId) {
+    const fallbackUserId = getCookieValue(req.headers.cookie, fallbackAuthCookie);
+    if (fallbackUserId && verifyFallbackAuth(fallbackUserId)) req.session.userId = fallbackUserId;
+  }
+  res.locals.setFallbackAuthCookie = appendFallbackAuthCookie;
+  res.locals.clearFallbackAuthCookie = clearFallbackAuthCookie;
+  next();
+});
 
 // Type augmentation for session user
 declare module 'express-session' {

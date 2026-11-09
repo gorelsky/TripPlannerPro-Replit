@@ -11,7 +11,7 @@ export default function Login() {
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
-  const [passwordMode, setPasswordMode] = useState(false);
+  const [passwordMode, setPasswordMode] = useState(true);
   const [passwordEmail, setPasswordEmail] = useState("");
   const [passwordValue, setPasswordValue] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -121,7 +121,7 @@ export default function Login() {
           ) : passwordMode ? (
             <form onSubmit={handlePasswordLogin} className="space-y-3">
               <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-                Резервный вход по email и паролю из базы приложения.
+                Вход по рабочему email и паролю из базы приложения.
               </div>
               <input
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -145,7 +145,7 @@ export default function Login() {
                 {passwordLoading ? "Проверка..." : "Войти по паролю"}
               </Button>
               <button type="button" className="w-full text-center text-sm text-muted-foreground underline underline-offset-4" onClick={() => setPasswordMode(false)}>
-                Вернуться к другим способам входа
+                Другие способы входа
               </button>
             </form>
           ) : oidcEnabled ? (
@@ -176,7 +176,7 @@ export default function Login() {
                 className="w-full text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
                 onClick={() => { setError(""); setPasswordMode(true); }}
               >
-                Войти по рабочему email и паролю
+                Войти через рабочий email и пароль
               </button>
             </div>
           ) : (
@@ -197,7 +197,7 @@ export default function Login() {
                 className="w-full text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
                 onClick={() => { setError(""); setPasswordMode(true); }}
               >
-                Войти по рабочему email и паролю
+                Войти через рабочий email и пароль
               </button>
             </div>
           )}
@@ -206,3 +206,4 @@ export default function Login() {
     </div>
   );
 }
+

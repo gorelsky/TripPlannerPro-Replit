@@ -158,19 +158,37 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
 
 export async function exchangeCode(code: string, verifier: string, nonce: string): Promise<OidcClaims> {
   const config = await getConfig();
-  const response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    signal: oidcTimeoutSignal(),
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.redirectUri,
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code_verifier: verifier,
-    }),
+  const tokenParams = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.redirectUri,
+    code_verifier: verifier,
   });
+  const basicAuth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+  let response = await fetch(config.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basicAuth}`,
+    },
+    signal: oidcTimeoutSignal(),
+    body: tokenParams,
+  });
+
+  // Yandex OIDC clients can be configured for either client_secret_basic or
+  // client_secret_post. Retry the alternate method when Basic is rejected.
+  if (!response.ok && (response.status === 400 || response.status === 401)) {
+    response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: oidcTimeoutSignal(),
+      body: new URLSearchParams({
+        ...Object.fromEntries(tokenParams),
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+      }),
+    });
+  }
   if (!response.ok) throw new Error(`OIDC token exchange failed: ${response.status}`);
   const tokens = await response.json() as { id_token?: string; access_token?: string };
   let claims: OidcClaims | undefined;

@@ -17,9 +17,8 @@ migration.on("error", (error) => {
 migration.on("exit", (code, signal) => {
   if (signal || code !== 0) {
     console.error(
-      `[STARTUP] Database migrations failed; TripPlanner was not started (code=${code ?? "none"}, signal=${signal ?? "none"}).`,
+      `[STARTUP] Database migrations failed; starting TripPlanner anyway (code=${code ?? "none"}, signal=${signal ?? "none"}).`,
     );
-    process.exit(code ?? 1);
   }
 
   const app = spawn(process.execPath, ["dist/index.js"], {
@@ -44,3 +43,4 @@ migration.on("exit", (code, signal) => {
   process.on("SIGTERM", () => forwardSignal("SIGTERM"));
   process.on("SIGINT", () => forwardSignal("SIGINT"));
 });
+

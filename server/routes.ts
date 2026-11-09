@@ -551,6 +551,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userId = user.id;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      res.locals.setFallbackAuthCookie(res, user.id);
       return res.json({ success: true });
     } catch (error) {
       console.error("[AUTH] Admin login session error:", error);
@@ -573,6 +574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userId = user.id;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      res.locals.setFallbackAuthCookie(res, user.id);
       return res.json({ success: true });
     } catch (error) {
       console.error("[AUTH] Password login session error:", error);
@@ -584,6 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/logout", async (req, res) => {
     setAuthNoStore(res);
     await finishLoginSession(req, "logout");
+    res.locals.clearFallbackAuthCookie(res);
     req.session.destroy((err) => {
       if (err) {
         return res.status(500).json({ error: "Logout failed" });

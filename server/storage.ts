@@ -385,7 +385,13 @@ export class PostgresStorage implements IStorage {
         process.env.BOOTSTRAP_ADMIN_PASSWORD
       ) {
         const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
-        const existingAdmin = await this.getUserByEmail(adminEmail);
+        // Do not call getUserByEmail here: initializationReady is still pending
+        // while initializeSampleData is running, which would deadlock startup.
+        const [existingAdmin] = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, adminEmail))
+          .limit(1);
         if (existingAdmin?.role === "admin") {
           await db
             .update(users)

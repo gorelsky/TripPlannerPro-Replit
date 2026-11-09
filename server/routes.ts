@@ -540,34 +540,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Локальный парольный вход оставлен только для отдельной учетной записи администратора.
   app.post("/api/auth/admin-login", async (req, res) => {
     setAuthNoStore(res);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) return res.status(400).json({ error: "Введите логин и пароль администратора" });
-    const user = await storage.validatePassword(email, password);
-    if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
-    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
-    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
-    req.session.userId = user.id;
-    await startLoginSession(req, user);
-    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-    res.json({ success: true });
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      if (!email || !password) return res.status(400).json({ error: "Введите логин и пароль администратора" });
+      const user = await storage.validatePassword(email, password);
+      if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
+      if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
+      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      req.session.userId = user.id;
+      await startLoginSession(req, user);
+      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[AUTH] Admin login session error:", error);
+      return res.status(500).json({ error: "Не удалось сохранить сессию администратора. Проверьте подключение базы и повторите вход." });
+    }
   });
 
   // Вход по email и паролю из trip_planner_users. Используется как основной
   // способ проверки приложения без внешнего провайдера авторизации.
   app.post("/api/auth/password-login", async (req, res) => {
     setAuthNoStore(res);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) return res.status(400).json({ error: "Введите email и пароль" });
-    const user = await storage.validatePassword(email, password);
-    if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
-    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
-    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
-    req.session.userId = user.id;
-    await startLoginSession(req, user);
-    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-    res.json({ success: true });
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      if (!email || !password) return res.status(400).json({ error: "Введите email и пароль" });
+      const user = await storage.validatePassword(email, password);
+      if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
+      if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
+      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      req.session.userId = user.id;
+      await startLoginSession(req, user);
+      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[AUTH] Password login session error:", error);
+      return res.status(500).json({ error: "Не удалось сохранить сессию. Проверьте подключение базы и повторите вход." });
+    }
   });
 
   // Logout

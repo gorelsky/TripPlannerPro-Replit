@@ -38,6 +38,14 @@ export default function Login() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "Не удалось выполнить вход администратора");
+      const sessionResponse = await fetch("/api/auth/session", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const session = await sessionResponse.json().catch(() => ({}));
+      if (!sessionResponse.ok || !session?.id) {
+        throw new Error(session?.error || "Сервер не сохранил сессию администратора. Повторите вход.");
+      }
       window.location.assign("/");
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Не удалось выполнить вход администратора");
@@ -59,6 +67,14 @@ export default function Login() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "Не удалось выполнить вход");
+      const sessionResponse = await fetch("/api/auth/session", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const session = await sessionResponse.json().catch(() => ({}));
+      if (!sessionResponse.ok || !session?.id) {
+        throw new Error(session?.error || "Сервер не сохранил сессию. Повторите вход.");
+      }
       window.location.assign("/");
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Не удалось выполнить вход");

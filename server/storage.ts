@@ -36,6 +36,37 @@ import { db } from "./db";
 import { eq, ne, sql } from "drizzle-orm";
 
 export interface IStorage {
+  private async ensureBootstrapAdmin() {
+    if (!process.env.BOOTSTRAP_ADMIN_EMAIL || !process.env.BOOTSTRAP_ADMIN_PASSWORD) return;
+
+    const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
+    const [configuredAdmin] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(trim(${users.email})) = ${adminEmail}`)
+      .limit(1);
+
+    if (!configuredAdmin) {
+      const bootstrapAdmin = {
+        id: randomUUID(),
+        fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
+        email: adminEmail,
+        password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
+        role: "admin" as const,
+        jobTitle: "Администратор",
+        userType: "manager" as const,
+        managerId: null,
+        managerName: null,
+        department: null,
+        homeCityId: null,
+        employmentStatus: "active" as const,
+        createdAt: new Date(),
+      };
+      await db.insert(users).values(bootstrapAdmin as any);
+      console.log(`[INIT] Bootstrap administrator ensured: ${adminEmail}`);
+    }
+  }
+
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -348,63 +379,17 @@ export class PostgresStorage implements IStorage {
     this.initialized = true;
 
     try {
+      // Create the configured administrator before optional schema upgrades.
+      // A restored database may reject one of the ALTER TABLE statements; that
+      // must not prevent the first administrator from logging in.
+      await this.ensureBootstrapAdmin();
+
       await this.ensureChatTable();
       await this.ensureTripBookingColumns();
       await this.ensureTripTypeColumns();
       await this.ensureTripMemoColumns();
       await this.ensureEmploymentStatusColumn();
       await this.ensureHomeCityColumn();
-
-      const usersCount = await db.select().from(users);
-      if (usersCount.length === 0 && process.env.BOOTSTRAP_ADMIN_EMAIL && process.env.BOOTSTRAP_ADMIN_PASSWORD) {
-        const bootstrapAdmin = {
-          id: randomUUID(),
-          fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
-          email: process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase(),
-          password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
-          role: "admin" as const,
-          jobTitle: "Администратор",
-          userType: "manager" as const,
-          managerId: null,
-          managerName: null,
-          department: null,
-          homeCityId: null,
-          employmentStatus: "active" as const,
-          createdAt: new Date(),
-        };
-        await db.insert(users).values(bootstrapAdmin as any);
-        console.log(`[INIT] Bootstrap administrator created: ${bootstrapAdmin.email}`);
-      }
-
-      // Ensure the configured bootstrap administrator exists even when the
-      // database already contains other users but was restored without admin.
-      if (process.env.BOOTSTRAP_ADMIN_EMAIL && process.env.BOOTSTRAP_ADMIN_PASSWORD) {
-        const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
-        const [configuredAdmin] = await db
-          .select()
-          .from(users)
-          .where(sql`lower(trim(${users.email})) = ${adminEmail}`)
-          .limit(1);
-        if (!configuredAdmin) {
-          const bootstrapAdmin = {
-            id: randomUUID(),
-            fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
-            email: adminEmail,
-            password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
-            role: "admin" as const,
-            jobTitle: "Администратор",
-            userType: "manager" as const,
-            managerId: null,
-            managerName: null,
-            department: null,
-            homeCityId: null,
-            employmentStatus: "active" as const,
-            createdAt: new Date(),
-          };
-          await db.insert(users).values(bootstrapAdmin as any);
-          console.log(`[INIT] Bootstrap administrator restored: ${adminEmail}`);
-        }
-      }
 
       // Allow an explicit one-time password reset for an existing bootstrap admin.
       // The flag is intentionally opt-in so changing BOOTSTRAP_ADMIN_PASSWORD alone

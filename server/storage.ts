@@ -36,37 +36,6 @@ import { db } from "./db";
 import { eq, ne, sql } from "drizzle-orm";
 
 export interface IStorage {
-  private async ensureBootstrapAdmin() {
-    if (!process.env.BOOTSTRAP_ADMIN_EMAIL || !process.env.BOOTSTRAP_ADMIN_PASSWORD) return;
-
-    const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
-    const [configuredAdmin] = await db
-      .select()
-      .from(users)
-      .where(sql`lower(trim(${users.email})) = ${adminEmail}`)
-      .limit(1);
-
-    if (!configuredAdmin) {
-      const bootstrapAdmin = {
-        id: randomUUID(),
-        fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
-        email: adminEmail,
-        password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
-        role: "admin" as const,
-        jobTitle: "Администратор",
-        userType: "manager" as const,
-        managerId: null,
-        managerName: null,
-        department: null,
-        homeCityId: null,
-        employmentStatus: "active" as const,
-        createdAt: new Date(),
-      };
-      await db.insert(users).values(bootstrapAdmin as any);
-      console.log(`[INIT] Bootstrap administrator ensured: ${adminEmail}`);
-    }
-  }
-
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -464,6 +433,37 @@ export class PostgresStorage implements IStorage {
       console.log(`[STORAGE] PostgreSQL initialized`);
     } catch (error) {
       console.error("[INIT] Error initializing sample data:", error);
+    }
+  }
+
+  private async ensureBootstrapAdmin() {
+    if (!process.env.BOOTSTRAP_ADMIN_EMAIL || !process.env.BOOTSTRAP_ADMIN_PASSWORD) return;
+
+    const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase();
+    const [configuredAdmin] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(trim(${users.email})) = ${adminEmail}`)
+      .limit(1);
+
+    if (!configuredAdmin) {
+      const bootstrapAdmin = {
+        id: randomUUID(),
+        fullName: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || "Администратор",
+        email: adminEmail,
+        password: this.hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD),
+        role: "admin" as const,
+        jobTitle: "Администратор",
+        userType: "manager" as const,
+        managerId: null,
+        managerName: null,
+        department: null,
+        homeCityId: null,
+        employmentStatus: "active" as const,
+        createdAt: new Date(),
+      };
+      await db.insert(users).values(bootstrapAdmin as any);
+      console.log(`[INIT] Bootstrap administrator ensured: ${adminEmail}`);
     }
   }
 

@@ -528,6 +528,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
       req.session.userId = user.id;
+      req.session.userEmail = user.email;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
       return res.redirect(returnTo);
@@ -549,6 +550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
       await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
       req.session.userId = user.id;
+      req.session.userEmail = user.email;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
       res.locals.setFallbackAuthCookie(res, user.id);
@@ -572,6 +574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
       await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
       req.session.userId = user.id;
+      req.session.userEmail = user.email;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
       res.locals.setFallbackAuthCookie(res, user.id);
@@ -604,11 +607,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const user = await storage.getUser(req.session.userId);
-      if (!user) {
-        return res.status(401).json({ error: "User not found" });
-      }
+      const resolvedUser = user || (req.session.userEmail ? await storage.getUserByEmail(req.session.userEmail) : undefined);
+      if (!resolvedUser) return res.status(401).json({ error: "User not found" });
 
-      const { password: _, ...userWithoutPassword } = user;
+      const { password: _, ...userWithoutPassword } = resolvedUser;
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ error: "Session check failed" });

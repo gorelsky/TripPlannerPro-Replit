@@ -65,11 +65,43 @@ async function getConfig(): Promise<OidcConfig> {
 }
 
 export function createOidcTransaction() {
-  const state = base64Url(crypto.randomBytes(32));
   const nonce = base64Url(crypto.randomBytes(32));
   const verifier = base64Url(crypto.randomBytes(48));
   const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
-  return { state, nonce, verifier, challenge };
+  const randomState = base64Url(crypto.randomBytes(32));
+  const payload = Buffer.from(JSON.stringify({
+    state: randomState,
+    nonce,
+    verifier,
+    issuedAt: Date.now(),
+  })).toString("base64url");
+  const secret = required("SESSION_SECRET");
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  return { state: `${payload}.${signature}`, nonce, verifier, challenge };
+}
+
+export function decodeOidcState(value: string): { state: string; nonce: string; verifier: string } | null {
+  const [payload, signature] = value.split(".");
+  if (!payload || !signature) return null;
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (!secret) return null;
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  const expectedBuffer = Buffer.from(expected);
+  const actualBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== actualBuffer.length || !crypto.timingSafeEqual(expectedBuffer, actualBuffer)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      state?: string;
+      nonce?: string;
+      verifier?: string;
+      issuedAt?: number;
+    };
+    if (!parsed.state || !parsed.nonce || !parsed.verifier || !parsed.issuedAt) return null;
+    if (Date.now() - parsed.issuedAt > 10 * 60 * 1000) return null;
+    return { state: parsed.state, nonce: parsed.nonce, verifier: parsed.verifier };
+  } catch {
+    return null;
+  }
 }
 
 export async function buildAuthorizationUrl(
@@ -166,3 +198,4 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   claims.email = normalizedEmail;
   return claims;
 }
+

@@ -25,6 +25,7 @@ import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 import {
   buildAuthorizationUrl,
   createOidcTransaction,
+  decodeOidcState,
   exchangeCode,
   isYandexOidcEnabled,
 } from "./yandex-oidc";
@@ -503,9 +504,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     setAuthNoStore(res);
     const { code, state, error } = req.query as Record<string, string | undefined>;
     if (error) return res.redirect(authErrorRedirect("Вход через Яндекс был отменен"));
-    const codeVerifier = req.session.oidcCodeVerifier;
-    const nonce = req.session.oidcNonce;
-    const expectedState = req.session.oidcState;
+    const signedState = state ? decodeOidcState(state) : null;
+    const codeVerifier = req.session.oidcCodeVerifier || signedState?.verifier;
+    const nonce = req.session.oidcNonce || signedState?.nonce;
+    const expectedState = req.session.oidcState || (signedState ? state : undefined);
     const returnTo = req.session.oidcReturnTo || "/";
     delete req.session.oidcState;
     delete req.session.oidcNonce;
@@ -3369,3 +3371,4 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+

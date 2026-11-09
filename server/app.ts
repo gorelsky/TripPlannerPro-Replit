@@ -83,9 +83,9 @@ app.use(session({
     // The OAuth callback is a top-level GET back to this site. Lax keeps the
     // session cookie available during that return without relying on
     // cross-site cookie exceptions in the browser.
-    // Yandex 360 returns to this app from a different site. None keeps the
-    // OAuth transaction cookie available during that cross-site callback.
-    sameSite: "none",
+    // The callback is a top-level GET navigation back to this site. Lax is
+    // broadly supported and avoids browsers rejecting a cross-site cookie.
+    sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
     httpOnly: true,
     path: "/",

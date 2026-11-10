@@ -157,6 +157,8 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
   const acceptedIssuers = new Set([
     config.issuer,
     config.authorizationUrl.replace(/\/$/, ""),
+    "https://auth.yandex.cloud",
+    "https://auth.cloud.yandex.com",
   ]);
   if (!acceptedIssuers.has(tokenIssuer)) throw new Error("Invalid OIDC issuer");
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
@@ -200,7 +202,11 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
       }),
     });
   }
-  if (!response.ok) throw new Error(`OIDC token exchange failed: ${response.status}`);
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => "");
+    const detail = responseText.replace(/\s+/g, " ").slice(0, 180);
+    throw new Error(`OIDC token exchange failed: ${response.status}${detail ? ` (${detail})` : ""}`);
+  }
   const tokens = await response.json() as { id_token?: string; access_token?: string };
   let claims: OidcClaims | undefined;
   if (tokens.id_token) {

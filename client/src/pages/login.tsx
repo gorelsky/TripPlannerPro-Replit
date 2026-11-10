@@ -11,7 +11,7 @@ export default function Login() {
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
-  const [passwordMode, setPasswordMode] = useState(true);
+  // Corporate users should see the Yandex 360 flow first; password login\r\n  // remains available as a fallback during the migration period.\r\n  const [passwordMode, setPasswordMode] = useState(false);
   const [passwordEmail, setPasswordEmail] = useState("");
   const [passwordValue, setPasswordValue] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);

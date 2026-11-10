@@ -549,7 +549,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.redirect(returnTo);
     } catch (callbackError) {
       console.error("[OIDC] Callback failed:", callbackError);
-      return res.redirect(authErrorRedirect("Не удалось выполнить корпоративный вход"));
+      const message = callbackError instanceof Error ? callbackError.message : "";
+      const safeMessage = message.includes("OIDC token exchange failed")
+        ? "Яндекс 360 не принял запрос обмена кода. Проверьте секрет OIDC-приложения."
+        : message.includes("OIDC issuer") || message.includes("OIDC audience") || message.includes("OIDC nonce") || message.includes("OIDC signing key")
+          ? "Яндекс 360 вернул токен с несовпадающими параметрами OIDC. Проверьте настройки OIDC-приложения."
+          : message.includes("Corporate email") || message.includes("user profile")
+            ? "Яндекс 360 не передал рабочий email пользователя. Проверьте область доступа email/profile."
+            : message.includes("User not found") || message.includes("User")
+              ? "Корпоративный email не найден в списке доступа приложения."
+              : "Не удалось завершить обмен с Яндекс 360. Проверьте настройки OIDC и подключение базы.";
+      return res.redirect(authErrorRedirect(safeMessage));
     }
   });
   

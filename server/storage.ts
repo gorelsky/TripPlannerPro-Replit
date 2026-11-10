@@ -367,7 +367,7 @@ export class PostgresStorage implements IStorage {
         const [targetUser] = await db
           .select()
           .from(users)
-          .where(sql\`lower(trim(\${users.email})) = \${resetEmail}\`)
+          .where(sql`lower(trim(${users.email})) = ${resetEmail}`)
           .limit(1);
         if (targetUser) {
           await db

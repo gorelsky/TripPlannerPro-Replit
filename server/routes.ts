@@ -156,12 +156,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } | undefined;
 
     if (!row) return credentialBroadcast;
+    const startedAt = new Date(row.started_at);
+    const isStale = row.status === "running" && Date.now() - startedAt.getTime() > 30 * 60 * 1000;
     return {
-      status: row.status,
+      status: isStale ? "interrupted" : row.status,
       total: Number(row.total),
       sent: Number(row.sent),
       failed: Number(row.failed),
-      startedAt: new Date(row.started_at).toISOString(),
+      startedAt: startedAt.toISOString(),
       completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : undefined,
     };
   }
@@ -173,8 +175,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = users[index];
       try {
         const newPassword = generateRandomPassword(8);
-        const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
+        const previousPasswordHash = user.password;
+        const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
+        if (!updatedUser) {
+          throw new Error("User was not found while updating the password");
+        }
 
+        const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
         const emailSent = await sendEmail({
           to: user.email,
           subject: "Тестовый период приложения для командировок: доступ к системе",
@@ -182,12 +189,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         if (!emailSent) {
-          throw new Error("Email delivery was not accepted; the previous password was kept");
-        }
-
-        const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
-        if (!updatedUser) {
-          throw new Error("Email was sent, but the user was not found while updating the password");
+          await storage.restoreUserPasswordHash(user.id, previousPasswordHash);
+          throw new Error("Email delivery was not accepted; the previous password was restored");
         }
 
         credentialBroadcast.sent += 1;
@@ -3304,20 +3307,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const lastBroadcast = await getLastCredentialBroadcast();
-      if (lastBroadcast.status === "running") {
-        // A previous server instance was restarted before it finished the queue.
-        await db.execute(sql`
-          UPDATE trip_planner_credential_broadcasts
-          SET status = 'interrupted', completed_at = now()
-          WHERE status = 'running'
-        `);
-        return res.json({
-          ...lastBroadcast,
-          status: "interrupted" as const,
-          completedAt: new Date().toISOString(),
-        });
-      }
-
       return res.json(lastBroadcast);
     } catch (error: any) {
       return res.status(500).json({ error: error.message || "Failed to read credential broadcast status" });
@@ -3332,8 +3321,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ error: "Рассылка уже выполняется" });
       }
 
+      const runningBroadcast = await db.execute(sql`
+        SELECT id
+        FROM trip_planner_credential_broadcasts
+        WHERE status = 'running'
+          AND started_at > now() - interval '30 minutes'
+        LIMIT 1
+      `);
+      if (runningBroadcast.rows.length > 0) {
+        return res.status(409).json({ error: "Рассылка уже выполняется" });
+      }
+
       const allUsers = await storage.getAllUsers();
-      const nonAdminUsers = allUsers.filter(u => u.role !== "admin");
+      const nonAdminUsers = allUsers.filter((user) =>
+        user.role !== "admin" &&
+        user.employmentStatus === "active" &&
+        user.email.trim().length > 0,
+      );
 
       if (nonAdminUsers.length === 0) {
         return res.status(400).json({ error: "No users to send credentials to" });

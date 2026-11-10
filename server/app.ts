@@ -1,4 +1,5 @@
 import { type Server } from "node:http";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 import express, {
   type Express,
@@ -90,10 +91,52 @@ app.use(session({
   },
 }));
 
+// Serverless containers may lose the PostgreSQL session between requests.
+const fallbackAuthCookie = "trip_planner_auth";
+const authSigningSecret = sessionSecret as string;
+function signFallbackAuth(userId: string, email?: string): string {
+  const payload = Buffer.from(JSON.stringify({ id: userId, email: email?.trim().toLowerCase() || undefined }), "utf8").toString("base64url");
+  const signature = createHmac("sha256", authSigningSecret).update(payload).digest("base64url");
+  return payload + "." + signature;
+}
+function verifyFallbackAuth(value: string): { id: string; email?: string } | undefined {
+  const parts = value.split(".");
+  const payload = parts[0]; const signature = parts[1];
+  if (!payload || !signature) return undefined;
+  const expected = createHmac("sha256", authSigningSecret).update(payload).digest("base64url");
+  const actual = Buffer.from(signature); const expectedBuffer = Buffer.from(expected);
+  if (actual.length !== expectedBuffer.length || !timingSafeEqual(actual, expectedBuffer)) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return parsed?.id ? { id: String(parsed.id), email: typeof parsed.email === "string" ? parsed.email : undefined } : undefined;
+  } catch { return undefined; }
+}
+function getCookie(header: string | undefined, name: string): string | undefined {
+  return header?.split(";").map((part) => part.trim()).find((part) => part.startsWith(name + "="))?.slice(name.length + 1);
+}
+function setFallbackAuthCookie(res: Response, userId: string, email?: string) {
+  const value = encodeURIComponent(signFallbackAuth(userId, email));
+  res.setHeader("Set-Cookie", fallbackAuthCookie + "=" + value + "; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax");
+}
+function clearFallbackAuthCookie(res: Response) {
+  res.setHeader("Set-Cookie", fallbackAuthCookie + "=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
+}
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (!req.session.userId) {
+    const value = getCookie(req.headers.cookie, fallbackAuthCookie);
+    const auth = value ? verifyFallbackAuth(decodeURIComponent(value)) : undefined;
+    if (auth) { req.session.userId = auth.id; req.session.userEmail = auth.email; }
+  }
+  res.locals.setFallbackAuthCookie = setFallbackAuthCookie;
+  res.locals.clearFallbackAuthCookie = clearFallbackAuthCookie;
+  next();
+});
+
 // Type augmentation for session user
 declare module 'express-session' {
   interface SessionData {
     userId: string;
+    userEmail?: string;
     loginSessionId?: string;
     oidcState?: string;
     oidcNonce?: string;

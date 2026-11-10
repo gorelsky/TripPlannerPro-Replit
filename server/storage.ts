@@ -374,9 +374,9 @@ export class PostgresStorage implements IStorage {
             .update(users)
             .set({ password: this.hashPassword(process.env.BOOTSTRAP_RESET_VALUE) })
             .where(eq(users.id, targetUser.id));
-          console.log(\`[INIT] Configured password reset completed: \${resetEmail}\`);
+          console.log("[INIT] Configured password reset completed: " + resetEmail);
         } else {
-          console.warn(\`[INIT] Configured password reset skipped: user not found for \${resetEmail}\`);
+          console.warn("[INIT] Configured password reset skipped: user not found for " + resetEmail);
         }
       }
 

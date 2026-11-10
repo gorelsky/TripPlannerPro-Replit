@@ -3,7 +3,7 @@ name: Build TripPlanner image for Yandex Cloud
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, codex/fix-yandex-oauth-session]
 
 permissions:
   contents: read

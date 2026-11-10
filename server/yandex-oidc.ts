@@ -136,14 +136,19 @@ function decodePart(part: string): Record<string, any> {
 
 async function verifyIdToken(token: string, config: OidcConfig, nonce: string): Promise<OidcClaims> {
   const pieces = token.split(".");
-  if (pieces.length !== 3) throw new Error("Invalid OIDC ID token");
+  if (pieces.length !== 3) throw new Error("OIDC_STAGE:id-token-format");
   const header = decodePart(pieces[0]);
   const claims = decodePart(pieces[1]) as OidcClaims;
-  const jwksResponse = await fetch(config.jwksUrl);
-  if (!jwksResponse.ok) throw new Error(`OIDC JWKS request failed: ${jwksResponse.status}`);
+  let jwksResponse: Response;
+  try {
+    jwksResponse = await fetch(config.jwksUrl, { signal: oidcTimeoutSignal() });
+  } catch {
+    throw new Error("OIDC_STAGE:jwks-network");
+  }
+  if (!jwksResponse.ok) throw new Error(`OIDC_STAGE:jwks-http-${jwksResponse.status}`);
   const jwks = await jwksResponse.json() as { keys: JsonWebKey[] };
   const jwk = jwks.keys.find((key: any) => key.kid === header.kid);
-  if (!jwk) throw new Error("OIDC signing key not found");
+  if (!jwk) throw new Error("OIDC_STAGE:jwks-key");
   const publicKey = crypto.createPublicKey({ key: jwk as any, format: "jwk" });
   const signature = Buffer.from(pieces[2], "base64url");
   const valid = crypto.verify(
@@ -152,7 +157,7 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
     { key: publicKey, ...(header.alg === "ES256" ? { dsaEncoding: "der" as const } : {}) },
     signature,
   );
-  if (!valid) throw new Error("Invalid OIDC ID token signature");
+  if (!valid) throw new Error("OIDC_STAGE:id-token-signature");
   const tokenIssuer = (claims.iss || "").replace(/\/$/, "");
   const acceptedIssuers = new Set([
     config.issuer,
@@ -160,12 +165,12 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
     "https://auth.yandex.cloud",
     "https://auth.cloud.yandex.com",
   ]);
-  if (!acceptedIssuers.has(tokenIssuer)) throw new Error("Invalid OIDC issuer");
+  if (!acceptedIssuers.has(tokenIssuer)) throw new Error("OIDC_STAGE:id-token-issuer");
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (!audience.includes(config.clientId)) throw new Error("Invalid OIDC audience");
-  if (claims.nonce !== nonce) throw new Error("Invalid OIDC nonce");
-  if (!claims.exp || claims.exp <= Math.floor(Date.now() / 1000)) throw new Error("Expired OIDC ID token");
-  if (!claims.sub) throw new Error("OIDC subject is missing");
+  if (!audience.includes(config.clientId)) throw new Error("OIDC_STAGE:id-token-audience");
+  if (claims.nonce !== nonce) throw new Error("OIDC_STAGE:id-token-nonce");
+  if (!claims.exp || claims.exp <= Math.floor(Date.now() / 1000)) throw new Error("OIDC_STAGE:id-token-expired");
+  if (!claims.sub) throw new Error("OIDC_STAGE:id-token-sub");
   return claims;
 }
 
@@ -178,36 +183,50 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
     code_verifier: verifier,
   });
   const basicAuth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
-  let response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${basicAuth}`,
-    },
-    signal: oidcTimeoutSignal(),
-    body: tokenParams,
-  });
+  let response: Response;
+  try {
+    response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${basicAuth}`,
+      },
+      signal: oidcTimeoutSignal(),
+      body: tokenParams,
+    });
+  } catch {
+    throw new Error("OIDC_STAGE:token-network");
+  }
 
   // Yandex OIDC clients can be configured for either client_secret_basic or
   // client_secret_post. Retry the alternate method when Basic is rejected.
   if (!response.ok && (response.status === 400 || response.status === 401)) {
-    response = await fetch(config.tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      signal: oidcTimeoutSignal(),
-      body: new URLSearchParams({
-        ...Object.fromEntries(tokenParams),
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-      }),
-    });
+    try {
+      response = await fetch(config.tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        signal: oidcTimeoutSignal(),
+        body: new URLSearchParams({
+          ...Object.fromEntries(tokenParams),
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+        }),
+      });
+    } catch {
+      throw new Error("OIDC_STAGE:token-network-retry");
+    }
   }
   if (!response.ok) {
     const responseText = await response.text().catch(() => "");
     const detail = responseText.replace(/\s+/g, " ").slice(0, 180);
-    throw new Error(`OIDC token exchange failed: ${response.status}${detail ? ` (${detail})` : ""}`);
+    throw new Error(`OIDC_STAGE:token-http-${response.status}`);
   }
-  const tokens = await response.json() as { id_token?: string; access_token?: string };
+  let tokens: { id_token?: string; access_token?: string };
+  try {
+    tokens = await response.json() as { id_token?: string; access_token?: string };
+  } catch {
+    throw new Error("OIDC_STAGE:token-json");
+  }
   let claims: OidcClaims | undefined;
   if (tokens.id_token) {
     claims = await verifyIdToken(tokens.id_token, config, nonce);
@@ -218,18 +237,28 @@ export async function exchangeCode(code: string, verifier: string, nonce: string
   // account to the application's access list.
   if ((!claims?.email && !claims?.default_email) && tokens.access_token && config.userInfoUrl) {
     const authorizationScheme = config.issuer.includes("oauth.yandex.ru") ? "OAuth" : "Bearer";
-    const userInfo = await fetch(config.userInfoUrl, {
-      signal: oidcTimeoutSignal(),
-      headers: { Authorization: `${authorizationScheme} ${tokens.access_token}` },
-    });
-    if (!userInfo.ok) throw new Error(`OIDC userinfo request failed: ${userInfo.status}`);
-    const profile = await userInfo.json() as OidcClaims;
+    let userInfo: Response;
+    try {
+      userInfo = await fetch(config.userInfoUrl, {
+        signal: oidcTimeoutSignal(),
+        headers: { Authorization: `${authorizationScheme} ${tokens.access_token}` },
+      });
+    } catch {
+      throw new Error("OIDC_STAGE:userinfo-network");
+    }
+    if (!userInfo.ok) throw new Error(`OIDC_STAGE:userinfo-http-${userInfo.status}`);
+    let profile: OidcClaims;
+    try {
+      profile = await userInfo.json() as OidcClaims;
+    } catch {
+      throw new Error("OIDC_STAGE:userinfo-json");
+    }
     claims = { ...claims, ...profile };
   }
 
-  if (!claims) throw new Error("OAuth response does not contain a usable user profile");
+  if (!claims) throw new Error("OIDC_STAGE:profile-missing");
   const normalizedEmail = String(claims.email || claims.default_email || "").trim().toLowerCase();
-  if (!normalizedEmail) throw new Error("Corporate email is missing in OIDC profile");
+  if (!normalizedEmail) throw new Error("OIDC_STAGE:profile-email-missing");
   claims.email = normalizedEmail;
   return claims;
 }

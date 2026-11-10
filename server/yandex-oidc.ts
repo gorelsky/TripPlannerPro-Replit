@@ -131,7 +131,11 @@ export async function buildAuthorizationUrl(
 }
 
 function decodePart(part: string): Record<string, any> {
-  return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+  try {
+    return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("OIDC_STAGE:id-token-payload");
+  }
 }
 
 async function verifyIdToken(token: string, config: OidcConfig, nonce: string): Promise<OidcClaims> {
@@ -139,6 +143,7 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
   if (pieces.length !== 3) throw new Error("OIDC_STAGE:id-token-format");
   const header = decodePart(pieces[0]);
   const claims = decodePart(pieces[1]) as OidcClaims;
+  if (!header.kid || !header.alg) throw new Error("OIDC_STAGE:id-token-header");
   let jwksResponse: Response;
   try {
     jwksResponse = await fetch(config.jwksUrl, { signal: oidcTimeoutSignal() });
@@ -146,17 +151,28 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
     throw new Error("OIDC_STAGE:jwks-network");
   }
   if (!jwksResponse.ok) throw new Error(`OIDC_STAGE:jwks-http-${jwksResponse.status}`);
-  const jwks = await jwksResponse.json() as { keys: JsonWebKey[] };
+  let jwks: { keys: JsonWebKey[] };
+  try {
+    jwks = await jwksResponse.json() as { keys: JsonWebKey[] };
+  } catch {
+    throw new Error("OIDC_STAGE:jwks-json");
+  }
+  if (!Array.isArray(jwks.keys)) throw new Error("OIDC_STAGE:jwks-format");
   const jwk = jwks.keys.find((key: any) => key.kid === header.kid);
   if (!jwk) throw new Error("OIDC_STAGE:jwks-key");
-  const publicKey = crypto.createPublicKey({ key: jwk as any, format: "jwk" });
-  const signature = Buffer.from(pieces[2], "base64url");
-  const valid = crypto.verify(
-    header.alg === "ES256" ? "sha256" : "RSA-SHA256",
-    Buffer.from(`${pieces[0]}.${pieces[1]}`),
-    { key: publicKey, ...(header.alg === "ES256" ? { dsaEncoding: "der" as const } : {}) },
-    signature,
-  );
+  let valid = false;
+  try {
+    const publicKey = crypto.createPublicKey({ key: jwk as any, format: "jwk" });
+    const signature = Buffer.from(pieces[2], "base64url");
+    valid = crypto.verify(
+      header.alg === "ES256" ? "sha256" : "RSA-SHA256",
+      Buffer.from(`${pieces[0]}.${pieces[1]}`),
+      { key: publicKey, ...(header.alg === "ES256" ? { dsaEncoding: "der" as const } : {}) },
+      signature,
+    );
+  } catch {
+    throw new Error("OIDC_STAGE:id-token-key");
+  }
   if (!valid) throw new Error("OIDC_STAGE:id-token-signature");
   const tokenIssuer = (claims.iss || "").replace(/\/$/, "");
   const acceptedIssuers = new Set([

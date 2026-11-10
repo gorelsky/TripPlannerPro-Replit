@@ -605,11 +605,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.validatePassword(email, password);
       if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
       if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
-      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      try {
+        await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      } catch (sessionError) {
+        console.error("[AUTH] Session regeneration failed; using current session:", sessionError);
+      }
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       await startLoginSession(req, user);
-      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      try {
+        await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      } catch (sessionError) {
+        // The signed fallback cookie keeps login working if the shared session
+        // store is temporarily unavailable in a serverless instance.
+        console.error("[AUTH] Session save failed; using fallback cookie:", sessionError);
+      }
       res.locals.setFallbackAuthCookie(res, user.id, user.email);
       return res.json({ success: true });
     } catch (error) {
@@ -629,11 +639,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.validatePassword(email, password);
       if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
       if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
-      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      try {
+        await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      } catch (sessionError) {
+        console.error("[AUTH] Session regeneration failed; using current session:", sessionError);
+      }
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       await startLoginSession(req, user);
-      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      try {
+        await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      } catch (sessionError) {
+        // The signed fallback cookie keeps login working if the shared session
+        // store is temporarily unavailable in a serverless instance.
+        console.error("[AUTH] Session save failed; using fallback cookie:", sessionError);
+      }
       res.locals.setFallbackAuthCookie(res, user.id, user.email);
       return res.json({ success: true });
     } catch (error) {

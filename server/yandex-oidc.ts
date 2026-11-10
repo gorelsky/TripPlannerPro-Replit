@@ -43,7 +43,13 @@ export function isYandexOidcEnabled(): boolean {
 }
 
 async function getConfig(): Promise<OidcConfig> {
-  const configuredIssuer = (process.env.OIDC_ISSUER || "https://auth.yandex.cloud").trim();\n  const issuerUrl = new URL(configuredIssuer);\n  // Accept an accidentally configured authorization endpoint, but always use\n  // the provider origin as the issuer for ID-token validation.\n  const issuer = issuerUrl.pathname === "/oauth/authorize" || issuerUrl.pathname === "/oauth/token"\n    ? issuerUrl.origin\n    : configuredIssuer.replace(/\/$/, "");
+  const configuredIssuer = (process.env.OIDC_ISSUER || "https://auth.yandex.cloud").trim();
+  const issuerUrl = new URL(configuredIssuer);
+  // Accept an accidentally configured authorization endpoint, but always use
+  // the provider origin as the issuer for ID-token validation.
+  const issuer = issuerUrl.pathname === "/oauth/authorize" || issuerUrl.pathname === "/oauth/token"
+    ? issuerUrl.origin
+    : configuredIssuer.replace(/\/$/, "");
   const legacyYandexOAuth = issuer.includes("oauth.yandex.ru");
   let metadata: Record<string, string> = {};
   if (!legacyYandexOAuth && (!process.env.OIDC_AUTHORIZATION_URL || !process.env.OIDC_TOKEN_URL || !process.env.OIDC_JWKS_URL)) {

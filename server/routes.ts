@@ -531,6 +531,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userEmail = user.email;
       await startLoginSession(req, user);
       await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      // Serverless requests may be handled by another instance immediately
+      // after the callback. Keep a signed fallback cookie so the first
+      // application request can restore the authenticated user reliably.
+      res.locals.setFallbackAuthCookie(res, user.id, user.email);
       return res.redirect(returnTo);
     } catch (callbackError) {
       console.error("[OIDC] Callback failed:", callbackError);

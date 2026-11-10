@@ -1726,7 +1726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ============ USER ACCOUNT ENDPOINTS ============
+  // ============ USER ACCOUNT ENDPOINTS ============P
 
   // Change password
   app.patch("/api/auth/change-password", async (req, res) => {

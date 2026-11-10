@@ -23,6 +23,12 @@ export type OidcClaims = {
   exp?: number;
 };
 
+const OIDC_REQUEST_TIMEOUT_MS = 15_000;
+
+function oidcTimeoutSignal() {
+  return AbortSignal.timeout(OIDC_REQUEST_TIMEOUT_MS);
+}
+
 const base64Url = (value: Buffer | string) =>
   Buffer.from(value).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 
@@ -37,7 +43,13 @@ export function isYandexOidcEnabled(): boolean {
 }
 
 async function getConfig(): Promise<OidcConfig> {
-  const issuer = (process.env.OIDC_ISSUER || "https://auth.yandex.cloud").replace(/\/$/, "");
+  const configuredIssuer = (process.env.OIDC_ISSUER || "https://auth.yandex.cloud").trim();
+  const issuerUrl = new URL(configuredIssuer);
+  // Accept an accidentally configured authorization endpoint, but always use
+  // the provider origin as the issuer for ID-token validation.
+  const issuer = issuerUrl.pathname === "/oauth/authorize" || issuerUrl.pathname === "/oauth/token"
+    ? issuerUrl.origin
+    : configuredIssuer.replace(/\/$/, "");
   const legacyYandexOAuth = issuer.includes("oauth.yandex.ru");
   let metadata: Record<string, string> = {};
   if (!legacyYandexOAuth && (!process.env.OIDC_AUTHORIZATION_URL || !process.env.OIDC_TOKEN_URL || !process.env.OIDC_JWKS_URL)) {
@@ -59,11 +71,43 @@ async function getConfig(): Promise<OidcConfig> {
 }
 
 export function createOidcTransaction() {
-  const state = base64Url(crypto.randomBytes(32));
   const nonce = base64Url(crypto.randomBytes(32));
   const verifier = base64Url(crypto.randomBytes(48));
   const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
-  return { state, nonce, verifier, challenge };
+  const randomState = base64Url(crypto.randomBytes(32));
+  const payload = Buffer.from(JSON.stringify({
+    state: randomState,
+    nonce,
+    verifier,
+    issuedAt: Date.now(),
+  })).toString("base64url");
+  const secret = required("SESSION_SECRET");
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  return { state: `${payload}.${signature}`, nonce, verifier, challenge };
+}
+
+export function decodeOidcState(value: string): { state: string; nonce: string; verifier: string } | null {
+  const [payload, signature] = value.split(".");
+  if (!payload || !signature) return null;
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (!secret) return null;
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  const expectedBuffer = Buffer.from(expected);
+  const actualBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== actualBuffer.length || !crypto.timingSafeEqual(expectedBuffer, actualBuffer)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      state?: string;
+      nonce?: string;
+      verifier?: string;
+      issuedAt?: number;
+    };
+    if (!parsed.state || !parsed.nonce || !parsed.verifier || !parsed.issuedAt) return null;
+    if (Date.now() - parsed.issuedAt > 10 * 60 * 1000) return null;
+    return { state: parsed.state, nonce: parsed.nonce, verifier: parsed.verifier };
+  } catch {
+    return null;
+  }
 }
 
 export async function buildAuthorizationUrl(
@@ -109,7 +153,12 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
     signature,
   );
   if (!valid) throw new Error("Invalid OIDC ID token signature");
-  if ((claims.iss || "").replace(/\/$/, "") !== config.issuer) throw new Error("Invalid OIDC issuer");
+  const tokenIssuer = (claims.iss || "").replace(/\/$/, "");
+  const acceptedIssuers = new Set([
+    config.issuer,
+    config.authorizationUrl.replace(/\/$/, ""),
+  ]);
+  if (!acceptedIssuers.has(tokenIssuer)) throw new Error("Invalid OIDC issuer");
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!audience.includes(config.clientId)) throw new Error("Invalid OIDC audience");
   if (claims.nonce !== nonce) throw new Error("Invalid OIDC nonce");
@@ -120,35 +169,62 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
 
 export async function exchangeCode(code: string, verifier: string, nonce: string): Promise<OidcClaims> {
   const config = await getConfig();
-  const response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.redirectUri,
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code_verifier: verifier,
-    }),
+  const tokenParams = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.redirectUri,
+    code_verifier: verifier,
   });
+  const basicAuth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+  let response = await fetch(config.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basicAuth}`,
+    },
+    signal: oidcTimeoutSignal(),
+    body: tokenParams,
+  });
+
+  // Yandex OIDC clients can be configured for either client_secret_basic or
+  // client_secret_post. Retry the alternate method when Basic is rejected.
+  if (!response.ok && (response.status === 400 || response.status === 401)) {
+    response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: oidcTimeoutSignal(),
+      body: new URLSearchParams({
+        ...Object.fromEntries(tokenParams),
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+      }),
+    });
+  }
   if (!response.ok) throw new Error(`OIDC token exchange failed: ${response.status}`);
   const tokens = await response.json() as { id_token?: string; access_token?: string };
-  let claims: OidcClaims;
+  let claims: OidcClaims | undefined;
   if (tokens.id_token) {
     claims = await verifyIdToken(tokens.id_token, config, nonce);
-  } else if (tokens.access_token && config.userInfoUrl) {
+  }
+
+  // Yandex Identity Hub may issue a valid ID token without email. In that
+  // case, use the access token to retrieve the profile before matching the
+  // account to the application's access list.
+  if ((!claims?.email && !claims?.default_email) && tokens.access_token && config.userInfoUrl) {
     const authorizationScheme = config.issuer.includes("oauth.yandex.ru") ? "OAuth" : "Bearer";
     const userInfo = await fetch(config.userInfoUrl, {
+      signal: oidcTimeoutSignal(),
       headers: { Authorization: `${authorizationScheme} ${tokens.access_token}` },
     });
     if (!userInfo.ok) throw new Error(`OIDC userinfo request failed: ${userInfo.status}`);
-    claims = await userInfo.json() as OidcClaims;
-  } else {
-    throw new Error("OAuth response does not contain a usable user profile");
+    const profile = await userInfo.json() as OidcClaims;
+    claims = { ...claims, ...profile };
   }
+
+  if (!claims) throw new Error("OAuth response does not contain a usable user profile");
   const normalizedEmail = String(claims.email || claims.default_email || "").trim().toLowerCase();
   if (!normalizedEmail) throw new Error("Corporate email is missing in OIDC profile");
   claims.email = normalizedEmail;
   return claims;
 }
+

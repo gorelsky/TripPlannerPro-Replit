@@ -556,6 +556,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? "Яндекс 360 не принял запрос обмена кода. Проверьте секрет OIDC-приложения."
         : normalizedMessage.includes("fetch failed") || normalizedMessage.includes("aborterror") || normalizedMessage.includes("econn") || normalizedMessage.includes("enotfound") || normalizedMessage.includes("timeout")
           ? "Контейнер не смог обратиться к серверу Яндекс 360. Проверьте OIDC_TOKEN_URL и сетевой доступ контейнера."
+          : normalizedMessage.includes("userinfo request failed")
+            ? "Яндекс 360 выдал токен, но не разрешил получить профиль пользователя. Проверьте scope email/profile и выбранные атрибуты OIDC-приложения."
+            : normalizedMessage.includes("expired oidc") || normalizedMessage.includes("token is expired") || normalizedMessage.includes("iat")
+              ? "Яндекс 360 выдал просроченный токен. Проверьте время контейнера и повторите вход в новой вкладке."
+              : normalizedMessage.includes("oauth response") || normalizedMessage.includes("access_token") || normalizedMessage.includes("id_token")
+                ? "Яндекс 360 вернул неполный ответ авторизации. Проверьте тип OIDC-приложения Web Application и включенные атрибуты openid/email/profile."
           : normalizedMessage.includes("database") || normalizedMessage.includes("postgres") || normalizedMessage.includes("relation") || normalizedMessage.includes("column") || normalizedMessage.includes("connect")
             ? "Корпоративный вход прошел, но приложение не смогло обратиться к базе Yandex PostgreSQL."
             : message.includes("OIDC issuer") || message.includes("OIDC audience") || message.includes("OIDC nonce") || message.includes("OIDC signing key") || message.includes("Invalid OIDC")

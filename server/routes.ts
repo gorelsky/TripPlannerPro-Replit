@@ -522,7 +522,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const email = String(claims.email || claims.default_email || "").trim().toLowerCase();
       if (!email) throw new Error("Corporate email is missing");
 
-      const user = await storage.getUserByEmail(email);
+      let user;
+      try {
+        user = await storage.getUserByEmail(email);
+      } catch {
+        throw new Error("APP_STAGE:database-user-lookup");
+      }
       if (!user) return res.redirect(authErrorRedirect("Пользователь не найден в списке доступа"));
       if (user.employmentStatus !== "active") return res.redirect(authErrorRedirect("Доступ пользователя отключен"));
 
@@ -552,7 +557,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const errorName = callbackError instanceof Error ? callbackError.name : "";
       const message = callbackError instanceof Error ? callbackError.message : String(callbackError || "");
       const normalizedMessage = message.toLowerCase();
-      const safeMessage = message.includes("OIDC token exchange failed")
+      const safeMessage = normalizedMessage.includes("oidc_stage:token-http-")
+        ? "Яндекс 360 отклонил обмен кода. Проверьте Client Secret и Redirect URI OIDC-приложения."
+        : normalizedMessage.includes("oidc_stage:token-network")
+          ? "Контейнер не может подключиться к Token endpoint Яндекс 360."
+          : normalizedMessage.includes("oidc_stage:jwks")
+            ? "Контейнер получил токен, но не смог проверить ключ подписи Яндекс 360."
+            : normalizedMessage.includes("oidc_stage:id-token")
+              ? "Яндекс 360 вернул токен с неверными параметрами OIDC."
+              : normalizedMessage.includes("oidc_stage:userinfo")
+                ? "Яндекс 360 не разрешил получить профиль пользователя. Проверьте атрибуты email/profile."
+                : normalizedMessage.includes("oidc_stage:profile")
+                  ? "Яндекс 360 не передал рабочий email пользователя."
+                  : normalizedMessage.includes("app_stage:database")
+                    ? "Корпоративный вход прошел, но запрос пользователя к Yandex PostgreSQL завершился ошибкой."
+                    : message.includes("OIDC token exchange failed")
         ? "Яндекс 360 не принял запрос обмена кода. Проверьте секрет OIDC-приложения."
         : normalizedMessage.includes("fetch failed") || normalizedMessage.includes("aborterror") || normalizedMessage.includes("econn") || normalizedMessage.includes("enotfound") || normalizedMessage.includes("timeout")
           ? "Контейнер не смог обратиться к серверу Яндекс 360. Проверьте OIDC_TOKEN_URL и сетевой доступ контейнера."

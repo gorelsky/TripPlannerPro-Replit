@@ -375,6 +375,26 @@ export class PostgresStorage implements IStorage {
             .set({ password: this.hashPassword(process.env.BOOTSTRAP_RESET_VALUE) })
             .where(eq(users.id, targetUser.id));
           console.log("[INIT] Configured password reset completed: " + resetEmail);
+        } else if (
+          process.env.BOOTSTRAP_RESET_CREATE?.trim().toLowerCase() === "true"
+        ) {
+          const createdUser = {
+            id: randomUUID(),
+            fullName: process.env.BOOTSTRAP_RESET_FULL_NAME?.trim() || resetEmail,
+            email: resetEmail,
+            password: this.hashPassword(process.env.BOOTSTRAP_RESET_VALUE),
+            role: (process.env.BOOTSTRAP_RESET_ROLE?.trim() || "coordinator") as any,
+            jobTitle: process.env.BOOTSTRAP_RESET_JOB_TITLE?.trim() || "Координатор",
+            userType: "manager" as const,
+            managerId: null,
+            managerName: null,
+            department: null,
+            homeCityId: null,
+            employmentStatus: "active" as const,
+            createdAt: new Date(),
+          };
+          await db.insert(users).values(createdUser as any);
+          console.log("[INIT] Configured password reset created user: " + resetEmail);
         } else {
           console.warn("[INIT] Configured password reset skipped: user not found for " + resetEmail);
         }

@@ -602,13 +602,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/session", async (req, res) => {
     setAuthNoStore(res);
     try {
-      if (!req.session.userId) {
+      if (!req.session.userId && !req.session.userEmail) {
         return res.status(401).json({ error: "Not authenticated" });
       }
 
-      const user = await storage.getUser(req.session.userId);
+      const user = req.session.userId ? await storage.getUser(req.session.userId) : undefined;
       const resolvedUser = user || (req.session.userEmail ? await storage.getUserByEmail(req.session.userEmail) : undefined);
       if (!resolvedUser) return res.status(401).json({ error: "User not found" });
+
+      // Keep both identifiers synchronized when the session store restores only
+      // the email field after a container restart or a transient DB session miss.
+      req.session.userId = resolvedUser.id;
+      req.session.userEmail = resolvedUser.email;
 
       const { password: _, ...userWithoutPassword } = resolvedUser;
       res.json(userWithoutPassword);

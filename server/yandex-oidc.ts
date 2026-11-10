@@ -153,7 +153,12 @@ async function verifyIdToken(token: string, config: OidcConfig, nonce: string): 
     signature,
   );
   if (!valid) throw new Error("Invalid OIDC ID token signature");
-  if ((claims.iss || "").replace(/\/$/, "") !== config.issuer) throw new Error("Invalid OIDC issuer");
+  const tokenIssuer = (claims.iss || "").replace(/\/$/, "");
+  const acceptedIssuers = new Set([
+    config.issuer,
+    config.authorizationUrl.replace(/\/$/, ""),
+  ]);
+  if (!acceptedIssuers.has(tokenIssuer)) throw new Error("Invalid OIDC issuer");
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!audience.includes(config.clientId)) throw new Error("Invalid OIDC audience");
   if (claims.nonce !== nonce) throw new Error("Invalid OIDC nonce");

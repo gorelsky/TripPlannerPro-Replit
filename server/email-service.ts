@@ -13,6 +13,13 @@ interface EmailOptions {
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   // In development or when no SMTP is configured, log to console.
   if (!process.env.SMTP_HOST) {
+    if (process.env.NODE_ENV === "production") {
+      console.error("[EMAIL] SMTP_HOST is not configured in production; email was not sent", {
+        to: options.to,
+        subject: options.subject,
+      });
+      return false;
+    }
     console.log("[EMAIL] Mock email service:");
     console.log(`To: ${options.to}`);
     console.log(`Subject: ${options.subject}`);

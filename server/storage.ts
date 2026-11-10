@@ -355,6 +355,31 @@ export class PostgresStorage implements IStorage {
       await this.ensureEmploymentStatusColumn();
       await this.ensureHomeCityColumn();
 
+      // Optional one-time recovery for a user whose password was changed in
+      // the old Railway/Supabase deployment. Keep target and password only in
+      // Yandex Cloud environment variables, never in the repository.
+      if (
+        process.env.BOOTSTRAP_RESET_PASSWORD?.trim().toLowerCase() === "true" &&
+        process.env.BOOTSTRAP_RESET_EMAIL &&
+        process.env.BOOTSTRAP_RESET_VALUE
+      ) {
+        const resetEmail = process.env.BOOTSTRAP_RESET_EMAIL.trim().toLowerCase();
+        const [targetUser] = await db
+          .select()
+          .from(users)
+          .where(sql\`lower(trim(\${users.email})) = \${resetEmail}\`)
+          .limit(1);
+        if (targetUser) {
+          await db
+            .update(users)
+            .set({ password: this.hashPassword(process.env.BOOTSTRAP_RESET_VALUE) })
+            .where(eq(users.id, targetUser.id));
+          console.log(\`[INIT] Configured password reset completed: \${resetEmail}\`);
+        } else {
+          console.warn(\`[INIT] Configured password reset skipped: user not found for \${resetEmail}\`);
+        }
+      }
+
       const usersCount = await db.select().from(users);
       if (usersCount.length === 0 && process.env.BOOTSTRAP_ADMIN_EMAIL && process.env.BOOTSTRAP_ADMIN_PASSWORD) {
         const bootstrapAdmin = {

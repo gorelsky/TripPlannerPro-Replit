@@ -25,6 +25,7 @@ import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 import {
   buildAuthorizationUrl,
   createOidcTransaction,
+  decodeOidcState,
   exchangeCode,
   isYandexOidcEnabled,
 } from "./yandex-oidc";
@@ -503,9 +504,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     setAuthNoStore(res);
     const { code, state, error } = req.query as Record<string, string | undefined>;
     if (error) return res.redirect(authErrorRedirect("Вход через Яндекс был отменен"));
-    const codeVerifier = req.session.oidcCodeVerifier;
-    const nonce = req.session.oidcNonce;
-    const expectedState = req.session.oidcState;
+    const signedState = state ? decodeOidcState(state) : null;
+    const codeVerifier = req.session.oidcCodeVerifier || signedState?.verifier;
+    const nonce = req.session.oidcNonce || signedState?.nonce;
+    const expectedState = req.session.oidcState || (signedState ? state : undefined);
     const returnTo = req.session.oidcReturnTo || "/";
     delete req.session.oidcState;
     delete req.session.oidcNonce;
@@ -524,10 +526,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) return res.redirect(authErrorRedirect("Пользователь не найден в списке доступа"));
       if (user.employmentStatus !== "active") return res.redirect(authErrorRedirect("Доступ пользователя отключен"));
 
-      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      // The signed fallback cookie is the recovery path for serverless
+      // instances. Do not reject a valid corporate login merely because the
+      // shared PostgreSQL session store is temporarily unavailable.
+      try {
+        await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      } catch (sessionError) {
+        console.error("[OIDC] Session regeneration failed; using current session:", sessionError);
+      }
       req.session.userId = user.id;
+      req.session.userEmail = user.email;
       await startLoginSession(req, user);
-      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      try {
+        await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      } catch (sessionError) {
+        console.error("[OIDC] Session save failed; using fallback cookie:", sessionError);
+      }
+      // Serverless requests may be handled by another instance immediately
+      // after the callback. Keep a signed fallback cookie so the first
+      // application request can restore the authenticated user reliably.
+      res.locals.setFallbackAuthCookie(res, user.id, user.email);
       return res.redirect(returnTo);
     } catch (callbackError) {
       console.error("[OIDC] Callback failed:", callbackError);
@@ -538,41 +556,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Локальный парольный вход оставлен только для отдельной учетной записи администратора.
   app.post("/api/auth/admin-login", async (req, res) => {
     setAuthNoStore(res);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) return res.status(400).json({ error: "Введите логин и пароль администратора" });
-    const user = await storage.validatePassword(email, password);
-    if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
-    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
-    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
-    req.session.userId = user.id;
-    await startLoginSession(req, user);
-    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-    res.json({ success: true });
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      if (!email || !password) return res.status(400).json({ error: "Введите логин и пароль администратора" });
+      const user = await storage.validatePassword(email, password);
+      if (!user || user.role !== "admin") return res.status(401).json({ error: "Неверный логин или пароль администратора" });
+      if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись администратора отключена" });
+      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      req.session.userId = user.id;
+      req.session.userEmail = user.email;
+      await startLoginSession(req, user);
+      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      res.locals.setFallbackAuthCookie(res, user.id, user.email);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[AUTH] Admin login session error:", error);
+      return res.status(500).json({ error: "Не удалось сохранить сессию администратора. Проверьте подключение базы и повторите вход." });
+    }
   });
 
-  // Резервный вход сотрудников по email и паролю из trip_planner_users.
-  // Администратор использует отдельную форму выше.
+  // Вход по email и паролю из trip_planner_users. Используется как основной
+  // способ проверки приложения без внешнего провайдера авторизации.
   app.post("/api/auth/password-login", async (req, res) => {
     setAuthNoStore(res);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) return res.status(400).json({ error: "Введите email и пароль" });
-    const user = await storage.validatePassword(email, password);
-    if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
-    if (user.role === "admin") return res.status(403).json({ error: "Для администратора используйте отдельный вход" });
-    if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
-    await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
-    req.session.userId = user.id;
-    await startLoginSession(req, user);
-    await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
-    res.json({ success: true });
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      if (!email || !password) return res.status(400).json({ error: "Введите email и пароль" });
+      const user = await storage.validatePassword(email, password);
+      if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
+      if (user.employmentStatus !== "active") return res.status(403).json({ error: "Учетная запись отключена" });
+      await new Promise<void>((resolve, reject) => req.session.regenerate((saveError) => saveError ? reject(saveError) : resolve()));
+      req.session.userId = user.id;
+      req.session.userEmail = user.email;
+      await startLoginSession(req, user);
+      await new Promise<void>((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
+      res.locals.setFallbackAuthCookie(res, user.id, user.email);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[AUTH] Password login session error:", error);
+      return res.status(500).json({ error: "Не удалось сохранить сессию. Проверьте подключение базы и повторите вход." });
+    }
   });
 
   // Logout
   app.post("/api/auth/logout", async (req, res) => {
     setAuthNoStore(res);
     await finishLoginSession(req, "logout");
+    res.locals.clearFallbackAuthCookie(res);
     req.session.destroy((err) => {
       if (err) {
         return res.status(500).json({ error: "Logout failed" });
@@ -585,16 +617,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/session", async (req, res) => {
     setAuthNoStore(res);
     try {
-      if (!req.session.userId) {
+      if (!req.session.userId && !req.session.userEmail) {
         return res.status(401).json({ error: "Not authenticated" });
       }
 
-      const user = await storage.getUser(req.session.userId);
-      if (!user) {
-        return res.status(401).json({ error: "User not found" });
-      }
+      const user = req.session.userId ? await storage.getUser(req.session.userId) : undefined;
+      const resolvedUser = user || (req.session.userEmail ? await storage.getUserByEmail(req.session.userEmail) : undefined);
+      if (!resolvedUser) return res.status(401).json({ error: "User not found" });
 
-      const { password: _, ...userWithoutPassword } = user;
+      // Keep both identifiers synchronized when the session store restores only
+      // the email field after a container restart or a transient DB session miss.
+      req.session.userId = resolvedUser.id;
+      req.session.userEmail = resolvedUser.email;
+
+      const { password: _, ...userWithoutPassword } = resolvedUser;
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ error: "Session check failed" });
@@ -3369,3 +3405,4 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+

@@ -19,7 +19,7 @@ import {
   type User,
   type TripStatus 
 } from "@shared/schema";
-import { sendEmail, generateChatNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
+import { sendEmail, sendEmailDetailed, generateChatNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 import {
@@ -230,15 +230,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
-        const emailSent = await sendEmail({
+        let delivery = await sendEmailDetailed({
           to: user.email,
           subject: "Тестовый период приложения для командировок: доступ к системе",
           html: emailContent,
         });
 
-        if (!emailSent) {
+        // Retry only transient SMTP failures with the same password and body.
+        for (const delay of [10_000, 20_000]) {
+          if (delivery.sent || !delivery.retryable) break;
+          await wait(delay);
+          delivery = await sendEmailDetailed({
+            to: user.email,
+            subject: "Тестовый период приложения для командировок: доступ к системе",
+            html: emailContent,
+          });
+        }
+
+        if (!delivery.sent) {
           await storage.restoreUserPasswordHash(user.id, previousPasswordHash);
-          throw new Error("Email delivery was not accepted; the previous password was restored");
+          throw new Error(`${delivery.error || "Email delivery was not accepted"}; the previous password was restored`);
         }
 
         credentialBroadcast.sent += 1;
@@ -3675,4 +3686,5 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+
 

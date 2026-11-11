@@ -255,6 +255,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await saveCredentialBroadcastProgress();
   }
 
+  async function startCredentialBroadcast(users: User[]) {
+    if (credentialBroadcast.status === "running") {
+      throw new Error("Рассылка уже выполняется");
+    }
+
+    await ensureCredentialBroadcastTable();
+    await ensureCredentialBroadcastRecipientTable();
+    const runningBroadcast = await db.execute(sql`
+      SELECT id
+      FROM trip_planner_credential_broadcasts
+      WHERE status = 'running'
+        AND started_at > now() - interval '30 minutes'
+      LIMIT 1
+    `);
+    if (runningBroadcast.rows.length > 0) {
+      throw new Error("Рассылка уже выполняется");
+    }
+
+    credentialBroadcastId = randomUUID();
+    credentialBroadcast = {
+      status: "running",
+      total: users.length,
+      sent: 0,
+      failed: 0,
+      startedAt: new Date().toISOString(),
+    };
+    await db.execute(sql`
+      INSERT INTO trip_planner_credential_broadcasts (id, status, total, sent, failed, started_at)
+      VALUES (${credentialBroadcastId}, ${credentialBroadcast.status}, ${credentialBroadcast.total}, ${credentialBroadcast.sent}, ${credentialBroadcast.failed}, ${credentialBroadcast.startedAt})
+    `);
+    for (const user of users) {
+      await db.execute(sql`
+        INSERT INTO trip_planner_credential_broadcast_recipients
+          (id, broadcast_id, user_id, email, full_name, status)
+        VALUES (${randomUUID()}, ${credentialBroadcastId}, ${user.id}, ${user.email}, ${user.fullName}, 'pending')
+        ON CONFLICT (broadcast_id, user_id) DO NOTHING
+      `);
+    }
+    void runCredentialBroadcast(users);
+    return credentialBroadcast;
+  }
+
   if (!fs.existsSync(attachmentsDir)) {
     fs.mkdirSync(attachmentsDir, { recursive: true });
   }
@@ -3382,47 +3424,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No users to send credentials to" });
       }
 
-      await ensureCredentialBroadcastTable();
-      await ensureCredentialBroadcastRecipientTable();
-      credentialBroadcastId = randomUUID();
-      credentialBroadcast = {
-        status: "running",
-        total: nonAdminUsers.length,
-        sent: 0,
-        failed: 0,
-        startedAt: new Date().toISOString(),
-      };
-      await db.execute(sql`
-        INSERT INTO trip_planner_credential_broadcasts (id, status, total, sent, failed, started_at)
-        VALUES (
-          ${credentialBroadcastId},
-          ${credentialBroadcast.status},
-          ${credentialBroadcast.total},
-          ${credentialBroadcast.sent},
-          ${credentialBroadcast.failed},
-          ${credentialBroadcast.startedAt}
-        )
-      `);
-
-      for (const user of nonAdminUsers) {
-        await db.execute(sql`
-          INSERT INTO trip_planner_credential_broadcast_recipients
-            (id, broadcast_id, user_id, email, full_name, status)
-          VALUES
-            (${randomUUID()}, ${credentialBroadcastId}, ${user.id}, ${user.email}, ${user.fullName}, 'pending')
-          ON CONFLICT (broadcast_id, user_id) DO NOTHING
-        `);
-      }
-
-      void runCredentialBroadcast(nonAdminUsers);
+      const progress = await startCredentialBroadcast(nonAdminUsers);
 
       res.status(202).json({
         success: true,
         message: "Рассылка запущена",
-        progress: credentialBroadcast,
+        progress,
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to send credentials" });
+      const status = error?.message === "Рассылка уже выполняется" ? 409 : 500;
+      res.status(status).json({ error: error.message || "Failed to send credentials" });
+    }
+  });
+
+  // One-recipient production test, restricted to the administrator's own address.
+  app.post("/api/users/send-credentials/test", requireAdmin, async (req, res) => {
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const allowedTestEmail = "e.gorelskiy@sls-pharma.ru";
+      if (email !== allowedTestEmail) {
+        return res.status(400).json({ error: `Тест разрешен только для ${allowedTestEmail}` });
+      }
+      const targetUser = (await storage.getAllUsers()).find((user) =>
+        user.email.trim().toLowerCase() === allowedTestEmail && user.employmentStatus === "active",
+      );
+      if (!targetUser) {
+        return res.status(404).json({ error: "Тестовый пользователь не найден или неактивен" });
+      }
+      const progress = await startCredentialBroadcast([targetUser]);
+      return res.status(202).json({ success: true, message: "Тестовая рассылка одному получателю запущена", progress });
+    } catch (error: any) {
+      const status = error?.message === "Рассылка уже выполняется" ? 409 : 500;
+      return res.status(status).json({ error: error.message || "Failed to send test credentials" });
     }
   });
 

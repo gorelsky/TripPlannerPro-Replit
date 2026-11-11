@@ -416,6 +416,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return credentialBroadcast;
   }
 
+  async function retryFailedCredentialBroadcast() {
+    await ensureCredentialBroadcastTable();
+    await ensureCredentialBroadcastRecipientTable();
+    const result = await db.execute(sql`
+      SELECT id, status, total, sent, failed, started_at, completed_at, updated_at
+      FROM trip_planner_credential_broadcasts
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    const row = result.rows[0] as {
+      id: string;
+      status: CredentialBroadcastStatus;
+      total: number;
+      sent: number;
+      failed: number;
+      started_at: Date | string;
+      completed_at: Date | string | null;
+      updated_at: Date | string;
+    } | undefined;
+
+    if (!row || row.status === "running") {
+      throw new Error(row?.status === "running" ? "Рассылка уже выполняется" : "Нет рассылки для повторной отправки");
+    }
+
+    const failedResult = await db.execute(sql`
+      SELECT user_id, email, full_name
+      FROM trip_planner_credential_broadcast_recipients
+      WHERE broadcast_id = ${row.id} AND status = 'failed'
+      ORDER BY lower(full_name), lower(email)
+    `);
+    if (failedResult.rows.length === 0) {
+      throw new Error("Ошибившихся получателей нет");
+    }
+
+    const usersById = new Map((await storage.getAllUsers()).map((user) => [user.id, user]));
+    const users: User[] = [];
+    let unavailableCount = 0;
+    for (const recipient of failedResult.rows as Array<{ user_id: string; email: string; full_name: string }>) {
+      const user = usersById.get(recipient.user_id);
+      if (user && user.employmentStatus === "active" && user.email.trim().length > 0) {
+        users.push(user);
+      } else {
+        unavailableCount += 1;
+        await db.execute(sql`
+          UPDATE trip_planner_credential_broadcast_recipients
+          SET error = 'Пользователь недоступен для повторной рассылки', updated_at = now()
+          WHERE broadcast_id = ${row.id} AND user_id = ${recipient.user_id} AND status = 'failed'
+        `);
+      }
+    }
+
+    if (users.length === 0) {
+      throw new Error("Нет активных пользователей для повторной отправки");
+    }
+
+    await db.execute(sql`
+      UPDATE trip_planner_credential_broadcast_recipients
+      SET status = 'pending', error = NULL, updated_at = now()
+      WHERE broadcast_id = ${row.id} AND status = 'failed'
+        AND user_id IN (${sql.join(users.map((user) => sql`${user.id}`), sql`, `)})
+    `);
+
+    credentialBroadcastId = row.id;
+    credentialBroadcast = {
+      status: "running",
+      total: Number(row.total),
+      sent: Number(row.sent),
+      failed: unavailableCount,
+      startedAt: new Date(row.started_at).toISOString(),
+    };
+    await saveCredentialBroadcastProgress();
+    void runCredentialBroadcast(users);
+    return credentialBroadcast;
+  }
+
   if (!fs.existsSync(attachmentsDir)) {
     fs.mkdirSync(attachmentsDir, { recursive: true });
   }
@@ -3562,6 +3637,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       const message = error?.message || "Не удалось продолжить рассылку";
+      const status = message === "Рассылка уже выполняется" ? 409 : 400;
+      return res.status(status).json({ error: message });
+    }
+  });
+
+  app.post("/api/users/send-credentials/retry-failed", requireAdmin, async (_req, res) => {
+    try {
+      const progress = await retryFailedCredentialBroadcast();
+      return res.status(202).json({
+        success: true,
+        message: "Повторная отправка ошибившимся получателям запущена",
+        progress,
+      });
+    } catch (error: any) {
+      const message = error?.message || "Не удалось запустить повторную отправку";
       const status = message === "Рассылка уже выполняется" ? 409 : 400;
       return res.status(status).json({ error: message });
     }

@@ -102,33 +102,29 @@ export function generateChatNotificationEmail(recipientName: string, senderName:
 }
 
 export function generateCredentialEmail(fullName: string, email: string, password: string): string {
-  const appUrl = process.env.APP_URL || "/";
+  const appUrl = process.env.APP_URL || "https://bba24tqeknn5rjnjom8k.containers.yandexcloud.net/";
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
-          <h2>Тестовый период приложения для командировок: доступ к системе</h2>
+          <h2>Приложения для командировок: доступ к системе</h2>
           <p>Добрый день, ${escapeHtml(fullName)}!</p>
           <p>С 01 декабря 2026 года запускается финальная версия приложения для планирования и согласования командировок.</p>
-          <p>Прошлая версия приложения работала на сервере, который требовал подключения VPN. Сейчас хранение данных и работа приложения перенесены на платформу Яндекс Cloud. Предполагается, что новая версия будет работать стабильнее и без VPN.</p>
-          <p>До 01.12.2026 предусмотрен период тестирования для пользователей, которые еще не успели ознакомиться с приложением. Тестирование продлится до 30.11.2026 включительно. В этот период можно ознакомиться с созданием плановых и внеплановых командировок, согласованием, календарём, чатом, Trivio и служебными записками.</p>
+          <p>Прошлая версия приложения работала на сервере, который требовал подключения VPN. Сейчас хранение данных и работа приложения перенесены на платформу Яндекс Cloud, предполагается более стабильная работа без VPN.</p>
+          <p>Сейчас до 01.12.2026 предусмотрен период тестирования для пользователей, которые еще не успели ознакомиться с приложением. Тестирование продлится до 30.11.2026 включительно. В этот период можно ознакомиться с созданием плановых и внеплановых командировок, согласованием, календарем, чатом, Trivio и служебными записками.</p>
           <p>Направляйте рациональные предложения по удобству работы и оптимизации через «Мой профиль» → «Связь с администратором» либо на <a href="mailto:admin.tripplanner@sls-pharma.ru">admin.tripplanner@sls-pharma.ru</a> до 01.12.2026.</p>
           <p>После завершения тестирования все тестовые командировки, согласования и сообщения будут очищены. С 01 декабря 2026 года все новые командировки необходимо будет оформлять через приложение.</p>
-          <p>Ниже указаны ваши персональные данные для входа:</p>
+          <p><strong>Ваши данные для входа:</strong></p>
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
             <p><strong>Email (логин):</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(email)}</code></p>
             <p><strong>Временный пароль:</strong> <code style="background: white; padding: 5px 10px; border-radius: 3px;">${escapeHtml(password)}</code></p>
           </div>
-          <p style="color: #666; font-size: 14px;">
-            <strong>Важно:</strong> после первого входа смените временный пароль в разделе «Мой профиль» → «Пароль».
-          </p>
+          <p><strong>Важно:</strong> после первого входа смените временный пароль в разделе «Мой профиль» → «Пароль».</p>
           <p style="margin: 24px 0;"><a href="${escapeHtml(appUrl)}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Перейти в приложение</a></p>
           <p>Инструкция по работе доступна в приложении в разделе «Инструкция».</p>
           <p>С уважением,<br>Администратор приложения</p>
           <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-          <p style="color: #999; font-size: 12px;">
-            Это автоматическое письмо. Пожалуйста, не отвечайте на него напрямую.
-          </p>
+          <p style="color: #999; font-size: 12px;">Это автоматическое письмо. Пожалуйста, не отвечайте на него напрямую.</p>
         </div>
       </body>
     </html>

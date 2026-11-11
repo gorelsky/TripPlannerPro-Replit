@@ -189,7 +189,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!row) return credentialBroadcast;
     const startedAt = new Date(row.started_at);
     const updatedAt = new Date(row.updated_at);
-    const isStale = row.status === "running" && Date.now() - updatedAt.getTime() > 60 * 1000;
+    // A running row is also interrupted when the current container instance
+    // does not own its in-memory job anymore (for example after a restart).
+    // This prevents a lost background task from permanently blocking resume.
+    const processOwnsBroadcast = credentialBroadcastId === row.id && credentialBroadcast.status === "running";
+    const isStale = row.status === "running" && (!processOwnsBroadcast || Date.now() - updatedAt.getTime() > 60 * 1000);
     if (isStale) {
       await db.execute(sql`
         UPDATE trip_planner_credential_broadcasts
@@ -338,7 +342,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       throw new Error("Нет незавершенной рассылки для продолжения");
     }
 
-    const isStale = row.status === "running" && Date.now() - new Date(row.updated_at).getTime() > 60 * 1000;
+    const processOwnsBroadcast = credentialBroadcastId === row.id && credentialBroadcast.status === "running";
+    const isStale = row.status === "running" && (!processOwnsBroadcast || Date.now() - new Date(row.updated_at).getTime() > 60 * 1000);
     if (row.status === "running" && !isStale) {
       throw new Error("Рассылка уже выполняется");
     }

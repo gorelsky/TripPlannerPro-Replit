@@ -86,8 +86,22 @@ export default function Admin() {
     completedAt?: string;
   };
 
+  type CredentialBroadcastRecipient = {
+    email: string;
+    full_name: string;
+    status: "pending" | "sending" | "sent" | "failed";
+    attempts: number;
+    error?: string | null;
+    sent_at?: string | null;
+    updated_at?: string | null;
+  };
+
   const { data: credentialBroadcast, refetch: refetchCredentialBroadcast } = useQuery<CredentialBroadcastProgress>({
     queryKey: ["/api/users/send-credentials/status"],
+  });
+  const { data: credentialRecipients = [], refetch: refetchCredentialRecipients } = useQuery<CredentialBroadcastRecipient[]>({
+    queryKey: ["/api/users/send-credentials/recipients"],
+    enabled: Boolean(credentialBroadcast?.startedAt),
   });
 
   useEffect(() => {
@@ -107,10 +121,11 @@ export default function Admin() {
 
     const pollId = window.setTimeout(() => {
       void refetchCredentialBroadcast();
+      void refetchCredentialRecipients();
     }, 1500);
 
     return () => window.clearTimeout(pollId);
-  }, [credentialBroadcast, isSendingCredentials, refetchCredentialBroadcast, toast]);
+  }, [credentialBroadcast, isSendingCredentials, refetchCredentialBroadcast, refetchCredentialRecipients, toast]);
 
   // ============ USERS ============
   const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
@@ -2238,6 +2253,35 @@ export default function Admin() {
                   <p className="text-sm text-destructive text-center" aria-live="polite">
                     Последняя рассылка была прервана перезапуском сервера: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}. Не запускайте её повторно, пока не уточним получателей.
                   </p>
+                )}
+                {credentialRecipients.length > 0 && (
+                  <div className="border rounded-lg overflow-auto max-h-80">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted sticky top-0">
+                        <tr>
+                          <th className="text-left p-2">Получатель</th>
+                          <th className="text-left p-2">Статус</th>
+                          <th className="text-left p-2">Ошибка</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {credentialRecipients.map((recipient) => (
+                          <tr key={recipient.email} className="border-t">
+                            <td className="p-2">
+                              <div>{recipient.full_name}</div>
+                              <div className="text-xs text-muted-foreground">{recipient.email}</div>
+                            </td>
+                            <td className="p-2">
+                              <Badge variant={recipient.status === "sent" ? "default" : recipient.status === "failed" ? "destructive" : "secondary"}>
+                                {recipient.status === "sent" ? "Отправлено" : recipient.status === "failed" ? "Ошибка" : recipient.status === "sending" ? "Отправляется" : "Ожидает"}
+                              </Badge>
+                            </td>
+                            <td className="p-2 text-xs text-destructive">{recipient.error || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </CardContent>

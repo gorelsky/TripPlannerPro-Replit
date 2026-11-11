@@ -2250,6 +2250,34 @@ export default function Admin() {
                     Последняя рассылка завершена: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}.
                   </p>
                 )}
+                {credentialBroadcast && credentialBroadcast.failed > 0 && credentialBroadcast.status !== "running" && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      apiRequest("POST", "/api/users/send-credentials/retry-failed", {})
+                        .then(async (response) => {
+                          const result = await response.json() as { progress: CredentialBroadcastProgress };
+                          queryClient.setQueryData(["/api/users/send-credentials/status"], result.progress);
+                          setIsSendingCredentials(true);
+                          toast({
+                            title: "Повторная отправка запущена",
+                            description: `Повторно отправляются только ошибившиеся получатели: ${credentialBroadcast.failed}. Успешные письма не повторяются.`,
+                          });
+                        })
+                        .catch((err) => {
+                          toast({
+                            title: "Не удалось повторить отправку",
+                            description: err.response?.data?.error || "Повторите попытку после обновления статуса.",
+                            variant: "destructive",
+                          });
+                        });
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Повторить отправку ошибившимся ({credentialBroadcast.failed})
+                  </Button>
+                )}
                 {credentialBroadcast?.status === "interrupted" && (
                   <div className="space-y-3">
                     <p className="text-sm text-destructive text-center" aria-live="polite">
@@ -2537,3 +2565,4 @@ export default function Admin() {
     </div>
   );
 }
+

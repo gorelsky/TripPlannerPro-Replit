@@ -115,9 +115,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sent integer NOT NULL DEFAULT 0,
           failed integer NOT NULL DEFAULT 0,
           started_at timestamptz NOT NULL DEFAULT now(),
-          completed_at timestamptz
+          completed_at timestamptz,
+          updated_at timestamptz NOT NULL DEFAULT now()
         )
-      `).then(() => undefined);
+      `).then(async () => {
+        await db.execute(sql`
+          ALTER TABLE trip_planner_credential_broadcasts
+          ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()
+        `);
+      });
     }
     return credentialBroadcastTableReady;
   }
@@ -151,7 +157,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SET status = ${credentialBroadcast.status},
             sent = ${credentialBroadcast.sent},
             failed = ${credentialBroadcast.failed},
-            completed_at = ${credentialBroadcast.completedAt || null}
+            completed_at = ${credentialBroadcast.completedAt || null},
+            updated_at = now()
         WHERE id = ${credentialBroadcastId}
       `);
     } catch (error) {
@@ -163,23 +170,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function getLastCredentialBroadcast(): Promise<CredentialBroadcastProgress> {
     await ensureCredentialBroadcastTable();
     const result = await db.execute(sql`
-      SELECT status, total, sent, failed, started_at, completed_at
+      SELECT id, status, total, sent, failed, started_at, completed_at, updated_at
       FROM trip_planner_credential_broadcasts
       ORDER BY started_at DESC
       LIMIT 1
     `);
     const row = result.rows[0] as {
       status: CredentialBroadcastStatus;
+      id: string;
       total: number;
       sent: number;
       failed: number;
       started_at: Date | string;
       completed_at: Date | string | null;
+      updated_at: Date | string;
     } | undefined;
 
     if (!row) return credentialBroadcast;
     const startedAt = new Date(row.started_at);
-    const isStale = row.status === "running" && Date.now() - startedAt.getTime() > 30 * 60 * 1000;
+    const updatedAt = new Date(row.updated_at);
+    const isStale = row.status === "running" && Date.now() - updatedAt.getTime() > 60 * 1000;
+    if (isStale) {
+      await db.execute(sql`
+        UPDATE trip_planner_credential_broadcasts
+        SET status = 'interrupted', completed_at = now(), updated_at = now()
+        WHERE id = ${row.id} AND status = 'running'
+      `);
+    }
     return {
       status: isStale ? "interrupted" : row.status,
       total: Number(row.total),
@@ -294,6 +311,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `);
     }
     void runCredentialBroadcast(users);
+    return credentialBroadcast;
+  }
+
+  async function resumeCredentialBroadcast() {
+    await ensureCredentialBroadcastTable();
+    await ensureCredentialBroadcastRecipientTable();
+    const result = await db.execute(sql`
+      SELECT id, status, total, sent, failed, started_at, completed_at, updated_at
+      FROM trip_planner_credential_broadcasts
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    const row = result.rows[0] as {
+      id: string;
+      status: CredentialBroadcastStatus;
+      total: number;
+      sent: number;
+      failed: number;
+      started_at: Date | string;
+      completed_at: Date | string | null;
+      updated_at: Date | string;
+    } | undefined;
+
+    if (!row || row.status === "completed") {
+      throw new Error("Нет незавершенной рассылки для продолжения");
+    }
+
+    const isStale = row.status === "running" && Date.now() - new Date(row.updated_at).getTime() > 60 * 1000;
+    if (row.status === "running" && !isStale) {
+      throw new Error("Рассылка уже выполняется");
+    }
+
+    await db.execute(sql`
+      UPDATE trip_planner_credential_broadcast_recipients
+      SET status = 'pending', updated_at = now()
+      WHERE broadcast_id = ${row.id} AND status = 'sending'
+    `);
+    await db.execute(sql`
+      UPDATE trip_planner_credential_broadcasts
+      SET status = 'running', completed_at = NULL, updated_at = now()
+      WHERE id = ${row.id}
+    `);
+
+    const recipientResult = await db.execute(sql`
+      SELECT user_id, email, full_name
+      FROM trip_planner_credential_broadcast_recipients
+      WHERE broadcast_id = ${row.id} AND status = 'pending'
+      ORDER BY lower(full_name), lower(email)
+    `);
+    const usersById = new Map((await storage.getAllUsers()).map((user) => [user.id, user]));
+    const users: User[] = [];
+    let missingUsers = 0;
+    for (const recipient of recipientResult.rows as Array<{ user_id: string; email: string; full_name: string }>) {
+      const user = usersById.get(recipient.user_id);
+      if (user && user.employmentStatus === "active" && user.email.trim().length > 0) {
+        users.push(user);
+      } else {
+        missingUsers += 1;
+        await db.execute(sql`
+          UPDATE trip_planner_credential_broadcast_recipients
+          SET status = 'failed', error = 'Пользователь недоступен для продолжения рассылки', updated_at = now()
+          WHERE broadcast_id = ${row.id} AND user_id = ${recipient.user_id} AND status = 'pending'
+        `);
+      }
+    }
+
+    credentialBroadcastId = row.id;
+    credentialBroadcast = {
+      status: "running",
+      total: Number(row.total),
+      sent: Number(row.sent),
+      failed: Number(row.failed) + missingUsers,
+      startedAt: new Date(row.started_at).toISOString(),
+    };
+    await saveCredentialBroadcastProgress();
+
+    if (users.length === 0) {
+      credentialBroadcast = {
+        ...credentialBroadcast,
+        status: "completed",
+        completedAt: new Date().toISOString(),
+      };
+      await saveCredentialBroadcastProgress();
+    } else {
+      void runCredentialBroadcast(users);
+    }
     return credentialBroadcast;
   }
 
@@ -3383,10 +3486,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/users/send-credentials/status", requireAdmin, async (_req, res) => {
     try {
-      if (credentialBroadcast.status === "running") {
-        return res.json(credentialBroadcast);
-      }
-
       const lastBroadcast = await getLastCredentialBroadcast();
       return res.json(lastBroadcast);
     } catch (error: any) {
@@ -3434,6 +3533,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       const status = error?.message === "Рассылка уже выполняется" ? 409 : 500;
       res.status(status).json({ error: error.message || "Failed to send credentials" });
+    }
+  });
+
+  app.post("/api/users/send-credentials/resume", requireAdmin, async (_req, res) => {
+    try {
+      const progress = await resumeCredentialBroadcast();
+      return res.status(202).json({
+        success: true,
+        message: "Продолжение рассылки запущено",
+        progress,
+      });
+    } catch (error: any) {
+      const message = error?.message || "Не удалось продолжить рассылку";
+      const status = message === "Рассылка уже выполняется" ? 409 : 400;
+      return res.status(status).json({ error: message });
     }
   });
 

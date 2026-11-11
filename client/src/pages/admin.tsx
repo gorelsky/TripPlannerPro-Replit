@@ -98,6 +98,7 @@ export default function Admin() {
 
   const { data: credentialBroadcast, refetch: refetchCredentialBroadcast } = useQuery<CredentialBroadcastProgress>({
     queryKey: ["/api/users/send-credentials/status"],
+    refetchInterval: 1500,
   });
   const { data: credentialRecipients = [], refetch: refetchCredentialRecipients } = useQuery<CredentialBroadcastRecipient[]>({
     queryKey: ["/api/users/send-credentials/recipients"],
@@ -2234,7 +2235,7 @@ export default function Admin() {
                     }
                   }}
                   className="w-full"
-                  disabled={isSendingCredentials || credentialBroadcast?.status === "running"}
+                  disabled={isSendingCredentials || credentialBroadcast?.status === "running" || credentialBroadcast?.status === "interrupted"}
                 >
                   <FileUp className="h-4 w-4 mr-2" />
                   {credentialBroadcast?.status === "running" ? "Выполняется рассылка..." : "Отправить письмо о запуске всем"}
@@ -2250,9 +2251,37 @@ export default function Admin() {
                   </p>
                 )}
                 {credentialBroadcast?.status === "interrupted" && (
-                  <p className="text-sm text-destructive text-center" aria-live="polite">
-                    Последняя рассылка была прервана перезапуском сервера: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}. Не запускайте её повторно, пока не уточним получателей.
-                  </p>
+                  <div className="space-y-3">
+                    <p className="text-sm text-destructive text-center" aria-live="polite">
+                      Последняя рассылка была прервана: успешно {credentialBroadcast.sent} из {credentialBroadcast.total}; ошибок: {credentialBroadcast.failed}. Уже отправленные письма повторно не уйдут.
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        apiRequest("POST", "/api/users/send-credentials/resume", {})
+                          .then(async (response) => {
+                            const result = await response.json() as { progress: CredentialBroadcastProgress };
+                            queryClient.setQueryData(["/api/users/send-credentials/status"], result.progress);
+                            setIsSendingCredentials(true);
+                            toast({
+                              title: "Рассылка продолжена",
+                              description: "Отправка продолжится с первого ожидающего получателя.",
+                            });
+                          })
+                          .catch((err) => {
+                            toast({
+                              title: "Не удалось продолжить рассылку",
+                              description: err.response?.data?.error || "Повторите попытку после обновления статуса.",
+                              variant: "destructive",
+                            });
+                          });
+                      }}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Продолжить рассылку
+                    </Button>
+                  </div>
                 )}
                 {credentialRecipients.length > 0 && (
                   <div className="border rounded-lg overflow-auto max-h-80">

@@ -51,6 +51,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   let credentialBroadcastId: string | null = null;
   let credentialBroadcastTableReady: Promise<void> | null = null;
+  let credentialBroadcastRecipientTableReady: Promise<void> | null = null;
   let loginSessionTableReady: Promise<void> | null = null;
 
   function ensureLoginSessionTable(): Promise<void> {
@@ -121,6 +122,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return credentialBroadcastTableReady;
   }
 
+  function ensureCredentialBroadcastRecipientTable(): Promise<void> {
+    if (!credentialBroadcastRecipientTableReady) {
+      credentialBroadcastRecipientTableReady = db.execute(sql`
+        CREATE TABLE IF NOT EXISTS trip_planner_credential_broadcast_recipients (
+          id varchar PRIMARY KEY,
+          broadcast_id varchar NOT NULL REFERENCES trip_planner_credential_broadcasts(id) ON DELETE CASCADE,
+          user_id varchar NOT NULL,
+          email text NOT NULL,
+          full_name text NOT NULL,
+          status text NOT NULL DEFAULT 'pending',
+          attempts integer NOT NULL DEFAULT 0,
+          error text,
+          sent_at timestamptz,
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (broadcast_id, user_id)
+        )
+      `).then(() => undefined);
+    }
+    return credentialBroadcastRecipientTableReady;
+  }
+
   async function saveCredentialBroadcastProgress() {
     if (!credentialBroadcastId) return;
     try {
@@ -173,18 +195,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function runCredentialBroadcast(users: User[]) {
     for (let index = 0; index < users.length; index += 1) {
       const user = users[index];
+      const previousPasswordHash = user.password;
       try {
+        await db.execute(sql`
+          UPDATE trip_planner_credential_broadcast_recipients
+          SET status = 'sending', attempts = attempts + 1, error = NULL, updated_at = now()
+          WHERE broadcast_id = ${credentialBroadcastId} AND user_id = ${user.id}
+        `);
+
         const newPassword = generateRandomPassword(8);
-        const previousPasswordHash = user.password;
         const updatedUser = await storage.updateUser(user.id, { password: newPassword } as any);
-        if (!updatedUser) {
-          throw new Error("User was not found while updating the password");
-        }
+        if (!updatedUser) throw new Error("User was not found while updating the password");
 
         const emailContent = generateCredentialEmail(user.fullName, user.email, newPassword);
         const emailSent = await sendEmail({
           to: user.email,
-          subject: "Тестовый период приложения для командировок: доступ к системе",
+          subject: "Приложения для командировок: доступ к системе",
           html: emailContent,
         });
 
@@ -194,18 +220,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         credentialBroadcast.sent += 1;
+        await db.execute(sql`
+          UPDATE trip_planner_credential_broadcast_recipients
+          SET status = 'sent', sent_at = now(), updated_at = now()
+          WHERE broadcast_id = ${credentialBroadcastId} AND user_id = ${user.id}
+        `);
         await saveCredentialBroadcastProgress();
         console.log(`[CREDENTIALS] Sent to ${user.email}`);
       } catch (error) {
         credentialBroadcast.failed += 1;
+        await db.execute(sql`
+          UPDATE trip_planner_credential_broadcast_recipients
+          SET status = 'failed', error = ${error instanceof Error ? error.message : String(error)}, updated_at = now()
+          WHERE broadcast_id = ${credentialBroadcastId} AND user_id = ${user.id}
+        `).catch((recipientError) => {
+          console.error("[CREDENTIALS] Failed to save recipient status:", recipientError);
+        });
         await saveCredentialBroadcastProgress();
         console.error(`[CREDENTIALS] Failed to send to ${user.email}:`, error);
       }
 
-      // Keep the provider-friendly pace requested for this campaign.
-      if (index < users.length - 1) {
-        await wait(5000);
-      }
+      if (index < users.length - 1) await wait(5000);
     }
 
     credentialBroadcast = {
@@ -3343,6 +3378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No users to send credentials to" });
       }
 
+      await ensureCredentialBroadcastRecipientTable();
       await ensureCredentialBroadcastTable();
       credentialBroadcastId = randomUUID();
       credentialBroadcast = {
@@ -3364,6 +3400,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
       `);
 
+      for (const user of nonAdminUsers) {
+        await db.execute(sql`
+          INSERT INTO trip_planner_credential_broadcast_recipients
+            (id, broadcast_id, user_id, email, full_name, status)
+          VALUES
+            (${randomUUID()}, ${credentialBroadcastId}, ${user.id}, ${user.email}, ${user.fullName}, 'pending')
+          ON CONFLICT (broadcast_id, user_id) DO NOTHING
+        `);
+      }
+
       void runCredentialBroadcast(nonAdminUsers);
 
       res.status(202).json({
@@ -3373,6 +3419,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send credentials" });
+    }
+  });
+
+  app.get("/api/users/send-credentials/recipients", requireAdmin, async (_req, res) => {
+    try {
+      await ensureCredentialBroadcastTable();
+      await ensureCredentialBroadcastRecipientTable();
+      const result = await db.execute(sql`
+        SELECT email, full_name, status, attempts, error, sent_at, updated_at
+        FROM trip_planner_credential_broadcast_recipients
+        WHERE broadcast_id = (SELECT id FROM trip_planner_credential_broadcasts ORDER BY started_at DESC LIMIT 1)
+        ORDER BY lower(full_name), lower(email)
+      `);
+      res.json(result.rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to read recipient statuses" });
     }
   });
 

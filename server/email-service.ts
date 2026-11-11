@@ -10,7 +10,27 @@ interface EmailOptions {
   html: string;
 }
 
-export async function sendEmail(options: EmailOptions): Promise<boolean> {
+export type EmailDeliveryResult = {
+  sent: boolean;
+  retryable: boolean;
+  error?: string;
+};
+
+function formatSmtpError(error: unknown, port: number): { message: string; retryable: boolean } {
+  const details = error as { code?: string; responseCode?: number; response?: string; message?: string };
+  const code = details?.code ? ` ${details.code}` : "";
+  const responseCode = details?.responseCode ? ` ${details.responseCode}` : "";
+  const response = details?.response ? `: ${details.response}` : "";
+  const message = details?.message || String(error);
+  const retryableCodes = new Set(["ECONNECTION", "ECONNRESET", "ETIMEDOUT", "ESOCKET", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"]);
+  const retryableResponse = typeof details?.responseCode === "number" && details.responseCode >= 400 && details.responseCode < 500;
+  return {
+    message: `SMTP ${port}${code}${responseCode}: ${message}${response}`,
+    retryable: retryableCodes.has(details?.code || "") || retryableResponse,
+  };
+}
+
+export async function sendEmailDetailed(options: EmailOptions): Promise<EmailDeliveryResult> {
   // In development or when no SMTP is configured, log to console.
   if (!process.env.SMTP_HOST) {
     if (process.env.NODE_ENV === "production") {
@@ -18,14 +38,14 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
         to: options.to,
         subject: options.subject,
       });
-      return false;
+      return { sent: false, retryable: false, error: "SMTP_HOST is not configured in production" };
     }
     console.log("[EMAIL] Mock email service:");
     console.log(`To: ${options.to}`);
     console.log(`Subject: ${options.subject}`);
     console.log(`Body:\n${options.html}`);
     console.log("---");
-    return true;
+    return { sent: true, retryable: false };
   }
 
   try {
@@ -33,6 +53,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
     // Some hosting networks block port 465. Yandex also supports STARTTLS on 587.
     const ports = configuredPort === 465 ? [465, 587] : [configuredPort];
 
+    let lastError: { message: string; retryable: boolean } | undefined;
     for (const port of ports) {
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
@@ -54,19 +75,24 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
           html: options.html,
         });
         console.log(`[EMAIL] Sent email to ${options.to}`);
-        return true;
+        return { sent: true, retryable: false };
       } catch (error) {
-        console.warn(`[EMAIL] SMTP delivery failed on port ${port} for ${options.to}`, error);
+        lastError = formatSmtpError(error, port);
+        console.warn(`[EMAIL] SMTP delivery failed on port ${port} for ${options.to}: ${lastError.message}`);
       }
     }
-    console.error(`[EMAIL] Failed to send email to ${options.to} on all configured SMTP ports`);
-    return false;
+    const error = lastError?.message || `Failed to send email to ${options.to} on all configured SMTP ports`;
+    console.error(`[EMAIL] ${error}`);
+    return { sent: false, retryable: lastError?.retryable ?? false, error };
   } catch (error) {
-    console.error(`[EMAIL] Failed to prepare email for ${options.to}`, error);
-    return false;
+    const details = formatSmtpError(error, Number(process.env.SMTP_PORT || 587));
+    console.error(`[EMAIL] Failed to prepare email for ${options.to}: ${details.message}`);
+    return { sent: false, retryable: details.retryable, error: details.message };
   }
+}
 
-  return false;
+export async function sendEmail(options: EmailOptions): Promise<boolean> {
+  return (await sendEmailDetailed(options)).sent;
 }
 
 function escapeHtml(value: string): string {
@@ -201,3 +227,4 @@ ${escapeHtml(message)}
     </html>
   `;
 }
+

@@ -9,7 +9,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AuthProvider, useAuth } from "@/contexts/auth-context";
-import slsLogo from "@assets/Средний_лого_1773929015411.png";
+import slsLogo from "@assets/logo-new-white.png";
 import Dashboard from "@/pages/dashboard";
 import CalendarView from "@/pages/calendar-view";
 import Trips from "@/pages/trips";
@@ -82,7 +82,7 @@ function AppContent() {
           <header className="flex items-center justify-between border-b bg-card px-4 py-3 shadow-xs">
             <div className="flex items-center gap-4">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <img src={slsLogo} alt="SLS Pharma" className="h-8 object-contain" />
+              <div className="rounded-md bg-[#16453e] px-3 py-1.5">\n                <img src={slsLogo} alt="SLS Pharma" className="h-8 w-auto object-contain" />\n              </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">{user.fullName}</span>

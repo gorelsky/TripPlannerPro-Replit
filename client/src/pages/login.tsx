@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, ShieldCheck } from "lucide-react";
-import slsLogo from "@assets/Средний_лого_1773929015411.png";
+import slsLogo from "@assets/logo-new-white.png";
 
 export default function Login() {
   const [error, setError] = useState("");

@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, ShieldCheck } from "lucide-react";
-import slsLogo from "@assets/logo-new-white.png";
+import legacySlsLogo from "@assets/Средний_лого_1773929015411.png";
+import yandexSlsLogo from "@assets/logo-new-white.png";
 
 export default function Login() {
+  const isYandexCloud = window.location.hostname.includes("yandexcloud.net");
+  const slsLogo = isYandexCloud ? yandexSlsLogo : legacySlsLogo;
   const [error, setError] = useState("");
   const [adminMode, setAdminMode] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
@@ -60,8 +63,8 @@ export default function Login() {
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-4 text-center">
-          <div className="flex items-center justify-center mx-auto mb-2">
-            <img src={slsLogo} alt="SLS Pharma" className="h-16 object-contain" />
+          <div className={isYandexCloud ? "flex items-center justify-center mx-auto mb-2 rounded-lg bg-[#10069f] px-6 py-4" : "flex items-center justify-center mx-auto mb-2"}>
+            <img src={slsLogo} alt="SLS Pharma" className="h-16 w-auto object-contain" />
           </div>
           <CardTitle className="text-2xl">Планировщик командировок</CardTitle>
           <CardDescription>Войдите с рабочим email и паролем</CardDescription>

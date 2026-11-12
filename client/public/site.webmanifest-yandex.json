@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "SLS Pharma - Командировки",
+  "short_name": "Командировки",
+  "description": "Система планирования и согласования командировок SLS Pharma",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#10069f",
+  "theme_color": "#10069f",
+  "icons": [
+    { "src": "/icon-192-yandex.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512-yandex.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512-maskable-yandex.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

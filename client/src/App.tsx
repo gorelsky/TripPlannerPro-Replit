@@ -9,7 +9,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AuthProvider, useAuth } from "@/contexts/auth-context";
-import slsLogo from "@assets/logo-new-white.png";
+import legacySlsLogo from "@assets/Средний_лого_1773929015411.png";
+import yandexSlsLogo from "@assets/logo-new-white.png";
 import Dashboard from "@/pages/dashboard";
 import CalendarView from "@/pages/calendar-view";
 import Trips from "@/pages/trips";
@@ -50,6 +51,8 @@ function Router() {
 function AppContent() {
   const { user, isLoading } = useAuth();
   const [location] = useLocation();
+  const isYandexCloud = window.location.hostname.includes("yandexcloud.net");
+  const slsLogo = isYandexCloud ? yandexSlsLogo : legacySlsLogo;
 
   useEffect(() => {
     scrollAppToTop();
@@ -82,7 +85,9 @@ function AppContent() {
           <header className="flex items-center justify-between border-b bg-card px-4 py-3 shadow-xs">
             <div className="flex items-center gap-4">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <div className="rounded-md bg-[#16453e] px-3 py-1.5">\n                <img src={slsLogo} alt="SLS Pharma" className="h-8 w-auto object-contain" />\n              </div>
+              <div className={isYandexCloud ? "rounded-md bg-[#10069f] px-3 py-1.5" : "px-0 py-0"}>
+                <img src={slsLogo} alt="SLS Pharma" className="h-8 w-auto object-contain" />
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">{user.fullName}</span>
@@ -116,3 +121,4 @@ function App() {
 }
 
 export default App;
+

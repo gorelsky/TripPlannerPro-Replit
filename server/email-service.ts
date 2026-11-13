@@ -116,10 +116,43 @@ export function generateChatNotificationEmail(recipientName: string, senderName:
           <p>Здравствуйте, ${escapeHtml(recipientName)}!</p>
           <p>Вам написал(а) <strong>${escapeHtml(senderName)}</strong> в системе планирования командировок.</p>
           <p style="margin: 24px 0;">
-            <a href="${chatUrl}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Открыть чат</a>
+            <a href="${chatUrl}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Перейти в приложение</a>
           </p>
           <p style="color: #666; font-size: 14px;">Текст сообщения в письме не отображается для сохранения конфиденциальности.</p>
           <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+          <p style="color: #999; font-size: 12px;">Это автоматическое уведомление. Пожалуйста, не отвечайте на него напрямую.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+
+export function generateApprovalNotificationEmail(
+  recipientName: string,
+  employeeName: string,
+  startDate: string,
+  endDate: string,
+  cityName: string,
+  tripType: string,
+): string {
+  const appUrl = process.env.APP_URL || "/";
+  const approvalUrl = `${appUrl.replace(/\/$/, "")}/approvals`;
+  const tripKind = tripType === "planned" ? "плановая" : "внеплановая";
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+          <h2>Требуется действие в TripPlanner</h2>
+          <p>Здравствуйте, ${escapeHtml(recipientName)}!</p>
+          <p>Вам поступила ${tripKind} командировка сотрудника <strong>${escapeHtml(employeeName)}</strong> и требуется ваше согласование.</p>
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>Город:</strong> ${escapeHtml(cityName || "не указан")}</p>
+            <p><strong>Период:</strong> ${escapeHtml(startDate)} — ${escapeHtml(endDate)}</p>
+          </div>
+          <p style="margin: 24px 0;">
+            <a href="${approvalUrl}" style="display: inline-block; padding: 10px 16px; color: #fff; background: #1e40af; border-radius: 4px; text-decoration: none;">Перейти в приложение</a>
+          </p>
           <p style="color: #999; font-size: 12px;">Это автоматическое уведомление. Пожалуйста, не отвечайте на него напрямую.</p>
         </div>
       </body>

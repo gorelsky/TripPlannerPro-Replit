@@ -10,6 +10,13 @@ const { Pool } = pg;
 
 const databaseConfig = getDatabaseConfig();
 
+function safeDatabaseIdentity(connectionString: string) {
+  const parsed = new URL(connectionString);
+  return `${databaseConfig.target}:${parsed.hostname}/${parsed.pathname.replace(/^\//, "")}`;
+}
+
+export const databaseIdentity = safeDatabaseIdentity(databaseConfig.connectionString);
+
 export const pool = new Pool({
   connectionString: databaseConfig.connectionString,
   ssl: databaseConfig.ssl,

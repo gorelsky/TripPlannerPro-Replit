@@ -74,7 +74,8 @@ export interface IStorage {
   updateTrip(id: string, trip: Partial<InsertTrip>): Promise<Trip | undefined>;
   deleteTrip(id: string): Promise<boolean>;
   deleteAllTrips(): Promise<void>;
-  clearAllTripAndCommunicationData(): Promise<void>;
+  getTripDataResetPreview(): Promise<{ trips: number; approvals: number; chatMessages: number; contactMessages: number }>;
+  clearAllTripAndCommunicationData(expectedCounts: { trips: number; approvals: number; chatMessages: number }): Promise<void>;
 
   // Approvals
   getApproval(id: string): Promise<Approval | undefined>;
@@ -786,12 +787,44 @@ export class PostgresStorage implements IStorage {
     await db.delete(trips);
   }
 
-  async clearAllTripAndCommunicationData(): Promise<void> {
+  async getTripDataResetPreview() {
+    const [tripRows, approvalRows, chatRows, contactRows] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(trips),
+      db.select({ count: sql<number>`count(*)::int` }).from(approvals),
+      db.select({ count: sql<number>`count(*)::int` }).from(chatMessages),
+      db.select({ count: sql<number>`count(*)::int` }).from(contactMessages),
+    ]);
+    return {
+      trips: tripRows[0]?.count ?? 0,
+      approvals: approvalRows[0]?.count ?? 0,
+      chatMessages: chatRows[0]?.count ?? 0,
+      contactMessages: contactRows[0]?.count ?? 0,
+    };
+  }
+
+  async clearAllTripAndCommunicationData(expectedCounts: { trips: number; approvals: number; chatMessages: number }): Promise<void> {
     await this.ensureChatTable();
     await db.transaction(async (tx) => {
+      await tx.execute(sql`LOCK TABLE trip_planner_trips, trip_planner_approvals, trip_planner_chat_messages IN SHARE ROW EXCLUSIVE MODE`);
+      const [tripRows, approvalRows, chatRows] = await Promise.all([
+        tx.select({ count: sql<number>`count(*)::int` }).from(trips),
+        tx.select({ count: sql<number>`count(*)::int` }).from(approvals),
+        tx.select({ count: sql<number>`count(*)::int` }).from(chatMessages),
+      ]);
+      const currentCounts = {
+        trips: tripRows[0]?.count ?? 0,
+        approvals: approvalRows[0]?.count ?? 0,
+        chatMessages: chatRows[0]?.count ?? 0,
+      };
+      if (
+        currentCounts.trips !== expectedCounts.trips ||
+        currentCounts.approvals !== expectedCounts.approvals ||
+        currentCounts.chatMessages !== expectedCounts.chatMessages
+      ) {
+        throw new Error("Trip data changed after preview; refresh the preview before retrying.");
+      }
       await tx.delete(approvals);
       await tx.delete(chatMessages);
-      await tx.delete(contactMessages);
       await tx.delete(trips);
     });
   }

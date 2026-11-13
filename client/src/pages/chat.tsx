@@ -208,9 +208,14 @@ export default function Chat() {
                         <div key={chatMessage.id} className={`flex ${ownMessage ? "justify-end" : "justify-start"}`}>
                           <div className={`max-w-[92%] rounded-md px-3 py-2 text-sm sm:max-w-[85%] ${ownMessage ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                             <p className="whitespace-pre-wrap break-words">{chatMessage.message}</p>
-                            <p className={`mt-1 text-[11px] ${ownMessage ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
-                              {formatTime(chatMessage)}
-                            </p>
+                            <div className={`mt-1 flex items-center gap-2 text-[11px] ${ownMessage ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
+                              <span>{formatTime(chatMessage)}</span>
+                              {ownMessage && (
+                                <span aria-label={chatMessage.isRead === "true" ? "Прочитано" : "Отправлено"}>
+                                  {chatMessage.isRead === "true" ? "Прочитано" : "Отправлено"}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );

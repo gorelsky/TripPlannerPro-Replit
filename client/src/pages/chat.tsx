@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { MessageCircle, Search, Send } from "lucide-react";
+import { Check, MessageCircle, Pencil, Search, Send, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +41,8 @@ export default function Chat() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [contactSearch, setContactSearch] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
 
   const { data: contacts = [], isLoading: contactsLoading } = useQuery<User[]>({
     queryKey: ["/api/chat/contacts"],
@@ -107,6 +109,21 @@ export default function Chat() {
         description: error.message,
         variant: "destructive",
       });
+    },
+  });
+
+  const editMessageMutation = useMutation({
+    mutationFn: async ({ id, text }: { id: string; text: string }) => {
+      const response = await apiRequest("PATCH", `/api/chat/messages/${encodeURIComponent(id)}`, { message: text });
+      return response.json() as Promise<ChatMessage>;
+    },
+    onSuccess: () => {
+      setEditingMessageId(null);
+      setEditingText("");
+      if (chatUrl) queryClient.invalidateQueries({ queryKey: [chatUrl] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Не удалось изменить сообщение", description: error.message, variant: "destructive" });
     },
   });
 
@@ -204,18 +221,28 @@ export default function Chat() {
                   <div className="space-y-3">
                     {messages.map((chatMessage) => {
                       const ownMessage = chatMessage.fromUserId === currentUser.id;
+                      const isEditing = editingMessageId === chatMessage.id;
                       return (
                         <div key={chatMessage.id} className={`flex ${ownMessage ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[92%] rounded-md px-3 py-2 text-sm sm:max-w-[85%] ${ownMessage ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            <p className="whitespace-pre-wrap break-words">{chatMessage.message}</p>
-                            <div className={`mt-1 flex items-center gap-2 text-[11px] ${ownMessage ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
-                              <span>{formatTime(chatMessage)}</span>
-                              {ownMessage && (
-                                <span aria-label={chatMessage.isRead === "true" ? "Прочитано" : "Отправлено"}>
-                                  {chatMessage.isRead === "true" ? "Прочитано" : "Отправлено"}
-                                </span>
-                              )}
-                            </div>
+                          <div className={`group relative max-w-[92%] rounded-md px-3 py-2 text-sm sm:max-w-[85%] ${ownMessage ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                            {isEditing ? (
+                              <div className="min-w-[220px] space-y-2">
+                                <Textarea value={editingText} onChange={(event) => setEditingText(event.target.value)} className="min-h-[80px] resize-none bg-background text-foreground" autoFocus />
+                                <div className="flex justify-end gap-2">
+                                  <Button type="button" variant="ghost" size="sm" onClick={() => { setEditingMessageId(null); setEditingText(""); }}><X /> Отмена</Button>
+                                  <Button type="button" size="sm" onClick={() => editMessageMutation.mutate({ id: chatMessage.id, text: editingText.trim() })} disabled={!editingText.trim() || editMessageMutation.isPending}><Check /> Сохранить</Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <p className="whitespace-pre-wrap break-words">{chatMessage.message}</p>
+                                <div className={`mt-1 flex items-center gap-2 text-[11px] ${ownMessage ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
+                                  <span>{formatTime(chatMessage)}{chatMessage.editedAt ? " · изменено" : ""}</span>
+                                  {ownMessage && <span aria-label={chatMessage.isRead === "true" ? "Прочитано" : "Отправлено"}>{chatMessage.isRead === "true" ? "Прочитано" : "Отправлено"}</span>}
+                                </div>
+                                {ownMessage && <button type="button" title="Редактировать сообщение" aria-label="Редактировать сообщение" className="absolute -left-9 top-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => { setEditingMessageId(chatMessage.id); setEditingText(chatMessage.message); }}><Pencil className="h-4 w-4" /></button>}
+                              </>
+                            )}
                           </div>
                         </div>
                       );

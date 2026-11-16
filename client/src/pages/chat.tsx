@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, MessageCircle, Pencil, Search, Send, X } from "lucide-react";
+import { Check, MessageCircle, Pencil, Search, Send, Smile, X } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import type { ChatMessage, User } from "@shared/schema";
 
@@ -34,6 +35,13 @@ type ChatUnreadData = {
   count: number;
   senders: Array<{ id: string }>;
 };
+
+const emojiGroups = [
+  { label: "Часто используемые", emojis: ["👍", "✅", "🙏", "🙂", "😊", "👏", "❤️", "🎉"] },
+  { label: "Работа и планирование", emojis: ["📅", "📌", "📝", "📎", "💬", "🔔", "⚠️", "❗"] },
+  { label: "Командировки", emojis: ["✈️", "🚆", "🚗", "🏨", "🗺️", "📍", "🧳", "🎫"] },
+  { label: "Эмоции", emojis: ["😀", "😃", "😄", "😉", "🤝", "🙌", "💡", "🎯"] },
+];
 
 export default function Chat() {
   const { user: currentUser } = useAuth();
@@ -252,6 +260,44 @@ export default function Chat() {
               </ScrollArea>
               <form onSubmit={handleSubmit} className="min-w-0 border-t p-3 sm:p-4">
                 <div className="flex flex-col gap-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-fit"
+                        disabled={!selectedUserId}
+                        aria-label="Добавить эмодзи"
+                        title="Добавить эмодзи"
+                      >
+                        <Smile />
+                        Эмодзи
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[min(340px,calc(100vw-2rem))] p-3">
+                      <div className="space-y-3">
+                        {emojiGroups.map((group) => (
+                          <div key={group.label}>
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}</p>
+                            <div className="grid grid-cols-8 gap-1">
+                              {group.emojis.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  className="flex h-8 w-8 items-center justify-center rounded-md text-lg hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  onClick={() => setMessage((current) => `${current}${emoji}`)}
+                                  aria-label={`Добавить ${emoji}`}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                   <Textarea
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}

@@ -111,6 +111,7 @@ export interface IStorage {
   getUnreadChatMessages(userId: string): Promise<ChatMessage[]>;
   getUnreadChatMessageCount(userId: string): Promise<number>;
   markChatMessagesAsRead(recipientId: string, senderId: string): Promise<void>;
+  updateChatMessage(messageId: string, senderId: string, message: string): Promise<ChatMessage | undefined>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -172,7 +173,8 @@ export class PostgresStorage implements IStorage {
         .then(() => db.execute(sql`
           ALTER TABLE trip_planner_chat_messages
             ADD COLUMN IF NOT EXISTS sender_time_zone text,
-            ADD COLUMN IF NOT EXISTS client_sent_at timestamptz
+            ADD COLUMN IF NOT EXISTS client_sent_at timestamptz,
+            ADD COLUMN IF NOT EXISTS edited_at timestamptz
         `))
         .then(() => undefined);
     }
@@ -949,6 +951,7 @@ export class PostgresStorage implements IStorage {
       isRead: "false",
       senderTimeZone: message.senderTimeZone ?? null,
       clientSentAt: message.clientSentAt ?? null,
+      editedAt: null,
       createdAt: new Date(),
     };
     await db.insert(chatMessages).values(newMessage as any);
@@ -989,6 +992,15 @@ export class PostgresStorage implements IStorage {
     await db.update(chatMessages)
       .set({ isRead: "true" })
       .where(sql`to_user_id = ${recipientId} AND from_user_id = ${senderId} AND is_read = 'false'`);
+  }
+
+  async updateChatMessage(messageId: string, senderId: string, message: string): Promise<ChatMessage | undefined> {
+    await this.ensureChatTable();
+    const updated = await db.update(chatMessages)
+      .set({ message, editedAt: new Date() })
+      .where(sql`id = ${messageId} AND from_user_id = ${senderId}`)
+      .returning();
+    return updated[0];
   }
 }
 

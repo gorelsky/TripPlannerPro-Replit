@@ -3439,6 +3439,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/chat/messages/:id", async (req, res) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const currentUser = await storage.getUser(req.session.userId);
+      const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+      if (!currentUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!message || message.length > 5000) {
+        return res.status(400).json({ error: "Message must contain from 1 to 5000 characters" });
+      }
+
+      const updatedMessage = await storage.updateChatMessage(req.params.id, currentUser.id, message);
+      if (!updatedMessage) {
+        return res.status(404).json({ error: "Message not found or cannot be edited" });
+      }
+      res.json(updatedMessage);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to edit chat message" });
+    }
+  });
+
   app.get("/api/chat/unread-count", async (req, res) => {
     try {
       if (!req.session.userId) {

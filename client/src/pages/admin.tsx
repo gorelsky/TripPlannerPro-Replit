@@ -69,6 +69,11 @@ export default function Admin() {
   const [routeSearch, setRouteSearch] = useState("");
   const [holidaySearch, setHolidaySearch] = useState("");
   const [messageSearch, setMessageSearch] = useState("");
+  const { data: resetPreview, refetch: refetchResetPreview } = useQuery<{
+    database: string;
+    counts: { trips: number; approvals: number; chatMessages: number; contactMessages: number };
+    preserved: string[];
+  }>({ queryKey: ["/api/admin/reset-trip-data-preview"] });
 
   const matchesSearch = (query: string, ...values: Array<string | null | undefined>) => {
     const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
@@ -650,7 +655,14 @@ export default function Admin() {
   });
 
   const resetAllTripDataMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/admin/reset-all-trip-data"),
+    mutationFn: (preview: NonNullable<typeof resetPreview>) => apiRequest("POST", "/api/admin/reset-all-trip-data", {
+      expectedDatabase: preview.database,
+      expectedCounts: {
+        trips: preview.counts.trips,
+        approvals: preview.counts.approvals,
+        chatMessages: preview.counts.chatMessages,
+      },
+    }),
     onSuccess: () => {
       [
         "/api/trips",
@@ -660,7 +672,8 @@ export default function Admin() {
         "/api/admin/messages",
         "/api/admin/messages/unread-count",
       ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey: [queryKey] }));
-      toast({ title: "Успешно", description: "Командировки, согласования, чаты и обращения удалены" });
+      refetchResetPreview();
+      toast({ title: "Успешно", description: "Командировки, согласования и чаты очищены; обращения сохранены" });
     },
     onError: () => {
       toast({ title: "Ошибка", description: "Не удалось удалить данные", variant: "destructive" });
@@ -2505,25 +2518,31 @@ export default function Admin() {
                 <div className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h4 className="font-medium text-destructive">Удалить все данные поездок и переписки</h4>
-                    <p className="text-sm text-muted-foreground">Удаляет командировки, согласования, сообщения чата и обращения к администратору. Пользователи и справочники останутся без изменений.</p>
+                    <p className="text-sm text-muted-foreground">Удаляет тестовые командировки, согласования и сообщения чата. Пользователи, справочники и обращения к администратору сохраняются.</p>
                   </div>
                   <Dialog>
                     <DialogTrigger asChild>
-                      <Button variant="destructive" size="sm">
+                      <Button variant="destructive" size="sm" onClick={() => refetchResetPreview()}>
                         <RotateCcw className="mr-2 h-4 w-4" />
                         Удалить все
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Удалить все данные поездок и переписки?</DialogTitle>
+                      <DialogTitle>Очистить тестовые поездки и переписку?</DialogTitle>
                         <DialogDescription>
-                          Будут безвозвратно удалены командировки, согласования, сообщения чата и обращения к администратору. Пользователи, города, маршруты, праздники и суточные сохранятся.
+                          Удаляются только командировки, согласования и сообщения чата. Пользователи, справочники и все обращения пользователей сохраняются.
                         </DialogDescription>
                       </DialogHeader>
+                    <div className="space-y-2 rounded-md border p-3 text-sm">
+                      <div><strong>Целевая база:</strong> {resetPreview?.database ?? "загружается…"}</div>
+                      <div><strong>Будет удалено:</strong> командировки {resetPreview?.counts.trips ?? "—"}, согласования {resetPreview?.counts.approvals ?? "—"}, сообщения чата {resetPreview?.counts.chatMessages ?? "—"}</div>
+                      <div><strong>Обращения к администратору, останутся:</strong> {resetPreview?.counts.contactMessages ?? "—"}</div>
+                      <a className="text-primary underline" href="/api/admin/contact-messages/export">Скачать резервную копию обращений (JSON)</a>
+                    </div>
                       <DialogFooter>
-                        <Button variant="destructive" onClick={() => resetAllTripDataMutation.mutate()} disabled={resetAllTripDataMutation.isPending}>
-                          Да, удалить все данные
+                        <Button variant="destructive" onClick={() => resetPreview && resetAllTripDataMutation.mutate(resetPreview)} disabled={resetAllTripDataMutation.isPending || !resetPreview}>
+                          Да, очистить тестовые данные
                         </Button>
                       </DialogFooter>
                     </DialogContent>

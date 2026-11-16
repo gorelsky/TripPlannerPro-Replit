@@ -5,8 +5,9 @@ import path from "node:path";
 import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
 import { sql } from "drizzle-orm";
-import { db } from "./db";
+import { db, databaseIdentity } from "./db";
 import { storage } from "./storage";
+import { buildTripDataResetPreview } from "./trip-data-reset";
 import { 
   insertUserSchema, 
   insertCitySchema, 
@@ -1684,11 +1685,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/admin/reset-all-trip-data", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/reset-trip-data-preview", requireAdmin, async (_req, res) => {
     try {
-      await storage.clearAllTripAndCommunicationData();
-      res.json({ success: true, message: "All trip, approval, chat, and contact data has been cleared" });
+      const preview = buildTripDataResetPreview(await storage.getTripDataResetPreview());
+      res.json({ database: databaseIdentity, ...preview });
+    } catch {
+      res.status(500).json({ error: "Failed to preview trip data reset" });
+    }
+  });
+
+  app.get("/api/admin/contact-messages/export", requireAdmin, async (_req, res) => {
+    try {
+      const messages = await storage.getAllContactMessages();
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="tripplanner-contact-messages.json"');
+      res.json({ exportedAt: new Date().toISOString(), database: databaseIdentity, count: messages.length, messages });
+    } catch {
+      res.status(500).json({ error: "Failed to export contact messages" });
+    }
+  });
+
+  app.post("/api/admin/reset-all-trip-data", requireAdmin, async (req, res) => {
+    try {
+      if (req.body?.expectedDatabase !== databaseIdentity) {
+        return res.status(409).json({ error: "Database target changed. Reload the preview before retrying." });
+      }
+      const counts = req.body?.expectedCounts;
+      if (!counts || ![counts.trips, counts.approvals, counts.chatMessages].every(Number.isInteger)) {
+        return res.status(400).json({ error: "A valid preview of deletion counts is required." });
+      }
+      await storage.clearAllTripAndCommunicationData(counts);
+      res.json({ success: true, message: "Trips, approvals, and chat messages cleared; contact messages preserved" });
     } catch (error) {
+      if (error instanceof Error && error.message.includes("changed after preview")) {
+        return res.status(409).json({ error: error.message });
+      }
       res.status(500).json({ error: "Failed to reset trip and communication data" });
     }
   });

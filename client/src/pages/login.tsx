@@ -3,11 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { AlertCircle, ShieldCheck } from "lucide-react";
 import legacySlsLogo from "@assets/Средний_лого_1773929015411.png";
-import yandexSlsLogo from "@assets/logo-new-white.png";
 
 export default function Login() {
   const isYandexCloud = window.location.hostname.includes("yandexcloud.net");
-  const slsLogo = isYandexCloud ? yandexSlsLogo : legacySlsLogo;
+  const slsLogo = isYandexCloud ? "/logo-yandex.jpg" : legacySlsLogo;
   const [error, setError] = useState("");
   const [adminMode, setAdminMode] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
@@ -63,7 +62,7 @@ export default function Login() {
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-4 text-center">
-          <div className={isYandexCloud ? "flex items-center justify-center mx-auto mb-2 rounded-lg bg-[#10069f] px-6 py-4" : "flex items-center justify-center mx-auto mb-2"}>
+          <div className={isYandexCloud ? "flex items-center justify-center mx-auto mb-2 rounded-lg bg-white px-3 py-2" : "flex items-center justify-center mx-auto mb-2"}>
             <img src={slsLogo} alt="SLS Pharma" className="h-16 w-auto object-contain" />
           </div>
           <CardTitle className="text-2xl">Планировщик командировок</CardTitle>

@@ -4,7 +4,7 @@
  */
 import nodemailer from "nodemailer";
 
-interface EmailOptions {
+export interface EmailOptions {
   to: string;
   subject: string;
   html: string;
@@ -30,7 +30,10 @@ function formatSmtpError(error: unknown, port: number): { message: string; retry
   };
 }
 
-export async function sendEmailDetailed(options: EmailOptions): Promise<EmailDeliveryResult> {
+export async function sendEmailDetailed(
+  options: EmailOptions,
+  createTransport: typeof nodemailer.createTransport = nodemailer.createTransport,
+): Promise<EmailDeliveryResult> {
   // In development or when no SMTP is configured, log to console.
   if (!process.env.SMTP_HOST) {
     if (process.env.NODE_ENV === "production") {
@@ -55,7 +58,7 @@ export async function sendEmailDetailed(options: EmailOptions): Promise<EmailDel
 
     let lastError: { message: string; retryable: boolean } | undefined;
     for (const port of ports) {
-      const transporter = nodemailer.createTransport({
+      const transporter = createTransport({
         host: process.env.SMTP_HOST,
         port,
         secure: port === 465,
@@ -105,9 +108,32 @@ function escapeHtml(value: string): string {
   })[character] || character);
 }
 
+function buildNotificationUrl(path: "chat" | "approvals"): string {
+  const configuredUrl = process.env.APP_URL?.trim();
+  if (!configuredUrl) {
+    throw new Error("APP_URL is required to create email notification links");
+  }
+
+  let appUrl: URL;
+  try {
+    appUrl = new URL(configuredUrl);
+  } catch {
+    throw new Error("APP_URL must be an absolute HTTP or HTTPS URL to create email notification links");
+  }
+
+  if (!(["http:", "https:"].includes(appUrl.protocol)) || !appUrl.hostname || appUrl.username || appUrl.password) {
+    throw new Error("APP_URL must be an absolute HTTP or HTTPS URL to create email notification links");
+  }
+
+  const basePath = appUrl.pathname.replace(/\/+$/, "");
+  appUrl.pathname = `${basePath}/${path}`;
+  appUrl.search = "";
+  appUrl.hash = "";
+  return appUrl.toString();
+}
+
 export function generateChatNotificationEmail(recipientName: string, senderName: string): string {
-  const appUrl = process.env.APP_URL || "/";
-  const chatUrl = `${appUrl.replace(/\/$/, "")}/chat`;
+  const chatUrl = buildNotificationUrl("chat");
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -136,8 +162,7 @@ export function generateApprovalNotificationEmail(
   cityName: string,
   tripType: string,
 ): string {
-  const appUrl = process.env.APP_URL || "/";
-  const approvalUrl = `${appUrl.replace(/\/$/, "")}/approvals`;
+  const approvalUrl = buildNotificationUrl("approvals");
   const tripKind = tripType === "planned" ? "плановая" : "внеплановая";
   return `
     <html>

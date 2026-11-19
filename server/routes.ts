@@ -19,7 +19,8 @@ import {
   type User,
   type TripStatus 
 } from "@shared/schema";
-import { sendEmail, sendEmailDetailed, generateChatNotificationEmail, generateApprovalNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
+import { sendEmail, sendEmailDetailed, generateChatNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
+import { createPendingApprovalAndNotify, dispatchEmailNotificationInBackground } from "./notification-delivery";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 import {
@@ -591,24 +592,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   async function createPendingApproval(tripId: string, approverId: string) {
-    await storage.createApproval({ tripId, approverId, status: "pending" });
-    const [trip, approver] = await Promise.all([
-      storage.getTripWithDetails(tripId),
-      storage.getUser(approverId),
-    ]);
-    if (!trip || !approver?.email) return;
-    void sendEmail({
-      to: approver.email,
-      subject: "Требуется согласование командировки - Планировщик командировок",
-      html: generateApprovalNotificationEmail(
-        approver.fullName,
-        trip.employee.fullName,
-        trip.startDate,
-        trip.endDate,
-        trip.city?.name || trip.route?.cities?.join(" — ") || "не указан",
-        trip.tripType,
-      ),
-    });
+    await createPendingApprovalAndNotify(storage, tripId, approverId);
   }
 
   async function submitTripForWorkflow(trip: Trip) {
@@ -3428,11 +3412,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         senderTimeZone,
         clientSentAt,
       });
-      void sendEmail({
-        to: recipient.email,
-        subject: "Новое сообщение в чате - Планировщик командировок",
-        html: generateChatNotificationEmail(recipient.fullName, currentUser.fullName),
-      });
+      dispatchEmailNotificationInBackground(
+        { type: "chat", chatMessageId: savedMessage.id },
+        async () => ({
+          to: recipient.email,
+          subject: "Новое сообщение в чате - Планировщик командировок",
+          html: generateChatNotificationEmail(recipient.fullName, currentUser.fullName),
+        }),
+      );
       res.status(201).json(savedMessage);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send chat message" });

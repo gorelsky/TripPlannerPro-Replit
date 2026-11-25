@@ -114,7 +114,7 @@ export default function Approvals() {
   const plannedTripsForBatchApproval = subordinateTrips.filter((trip) =>
     trip.tripType === "planned" &&
     trip.status === "awaiting_ceo_signature" &&
-    hasPendingApproval(trip),
+    (currentUser?.role === "admin" || hasPendingApproval(trip)),
   );
   const batchApproveMutation = useMutation({
     mutationFn: async () => {
@@ -256,7 +256,7 @@ export default function Approvals() {
               <CardDescription>Заявки на командировки от подчиненных</CardDescription>
             </div>
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
-              {currentUser?.role === "ceo" && plannedTripsForBatchApproval.length > 0 && (
+              {["ceo", "admin"].includes(currentUser?.role || "") && plannedTripsForBatchApproval.length > 0 && (
                 <Button
                   onClick={() => batchApproveMutation.mutate()}
                   disabled={batchApproveMutation.isPending}

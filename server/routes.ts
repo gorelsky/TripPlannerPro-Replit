@@ -19,7 +19,7 @@ import {
   type User,
   type TripStatus 
 } from "@shared/schema";
-import { sendEmail, sendEmailDetailed, generateChatNotificationEmail, generateApprovalNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
+import { sendEmail, sendEmailDetailed, generateChatNotificationEmail, generateApprovalNotificationEmail, generateRegistryApprovalNotificationEmail, generateCredentialEmail, generateNewUserCredentialEmail, generatePasswordResetEmail, generateContactAdminEmail } from "./email-service";
 import { generateRandomPassword, validatePassword } from "./password-utils";
 import { generateTripMemo, type TripMemoKind } from "./trip-memo-generator";
 import {
@@ -1812,6 +1812,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Report error:", error);
       res.status(422).json({ error: error instanceof Error ? error.message : "Не удалось сформировать реестр" });
+    }
+  });
+
+  app.post("/api/admin/trips-report/notify", async (req, res) => {
+    try {
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+      const sender = await storage.getUser(req.session.userId);
+      if (!sender || !["admin", "coordinator"].includes(sender.role || "")) {
+        return res.status(403).json({ error: "Рассылка реестра доступна только администратору и координатору" });
+      }
+      const period = getReportDateRange(req.body || {});
+      if (!period) return res.status(400).json({ error: "Укажите корректные даты периода" });
+      const report = await getReportData(period.startDate, period.endDate);
+      const registryTrips = [...report.withAllowance, ...report.withoutAllowance];
+      const grouped = new Map<string, { user: User; trips: typeof registryTrips }>();
+      for (const trip of registryTrips) {
+        const employee = trip.employee;
+        if (!employee?.id || !employee.email?.trim()) continue;
+        const existing = grouped.get(employee.id);
+        if (existing) existing.trips.push(trip);
+        else grouped.set(employee.id, { user: employee, trips: [trip] });
+      }
+      let chatSent = 0;
+      let emailSent = 0;
+      const failed: Array<{ fullName: string; email: string; error: string }> = [];
+      for (const group of Array.from(grouped.values())) {
+        const { user, trips } = group;
+        const tripSummary = trips.map((trip) => `${trip.startDate} — ${trip.endDate}, ${trip.route?.path || "маршрут не указан"}`).join("; ");
+        try {
+          await storage.saveChatMessage({
+            fromUserId: sender.id,
+            toUserId: user.id,
+            message: `Уважаемый(ая) ${user.fullName}! Ваша командировка (или командировки) согласована Генеральным директором и включена в утверждённый реестр. ${tripSummary}`,
+          });
+          chatSent += 1;
+        } catch (error: any) {
+          failed.push({ fullName: user.fullName, email: user.email, error: `Чат: ${error?.message || "ошибка отправки"}` });
+        }
+        const delivered = await sendEmail({
+          to: user.email,
+          subject: "Командировка согласована Генеральным директором",
+          html: generateRegistryApprovalNotificationEmail(user.fullName, trips.map((trip) => ({
+            startDate: trip.startDate,
+            endDate: trip.endDate,
+            route: trip.route?.path || "",
+            tripType: trip.tripType,
+          }))),
+        });
+        if (delivered) emailSent += 1;
+        else failed.push({ fullName: user.fullName, email: user.email, error: "Email: SMTP не подтвердил доставку" });
+      }
+      res.json({ recipients: grouped.size, chatSent, emailSent, failed });
+    } catch (error: any) {
+      console.error("Registry notification error:", error);
+      res.status(422).json({ error: error instanceof Error ? error.message : "Не удалось выполнить рассылку реестра" });
     }
   });
 
@@ -3837,5 +3892,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+
 
 

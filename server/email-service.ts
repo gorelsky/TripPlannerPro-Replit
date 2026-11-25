@@ -185,6 +185,42 @@ export function generateApprovalNotificationEmail(
   `;
 }
 
+
+export function generateRegistryApprovalNotificationEmail(
+  recipientName: string,
+  trips: Array<{ startDate: string; endDate: string; route: string; tripType: string }>,
+): string {
+  const appUrl = process.env.APP_URL || "/";
+  const tripRows = trips.map((trip) => `
+    <li style="margin-bottom: 8px;">
+      ${escapeHtml(trip.startDate)} — ${escapeHtml(trip.endDate)};
+      ${escapeHtml(trip.route || "маршрут не указан")};
+      ${escapeHtml(trip.tripType === "planned" ? "плановая" : "внеплановая")}
+    </li>
+  `).join("");
+
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 620px; margin: 0 auto; padding: 24px; border: 1px solid #d8dee9; border-radius: 8px;">
+          <h2 style="margin-top: 0;">Согласование командировки</h2>
+          <p>Уважаемый(ая) ${escapeHtml(recipientName)}!</p>
+          <p>Сообщаем, что Ваша командировка (или командировки) согласована Генеральным директором и включена в утверждённый реестр командировок.</p>
+          <ul style="padding-left: 22px;">${tripRows}</ul>
+          <p>Подробные сведения доступны в приложении.</p>
+          <p style="margin: 24px 0;">
+            <a href="${escapeHtml(appUrl)}" style="display: inline-block; padding: 12px 22px; color: #fff; background: #1e40af; border-radius: 5px; text-decoration: none; font-weight: 700;">Открыть приложение</a>
+          </p>
+          <p style="display: inline-block; margin: 18px 0 24px; padding: 8px 18px; border: 2px solid #15803d; color: #15803d; font-weight: 700; letter-spacing: 1px; transform: rotate(-3deg);">СОГЛАСОВАНО</p>
+          <p style="margin-bottom: 0;">С уважением,<br>Администратор приложения</p>
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+          <p style="color: #999; font-size: 12px; margin-bottom: 0;">Это автоматическое уведомление. Пожалуйста, не отвечайте на него напрямую.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export function generateCredentialEmail(fullName: string, email: string, password: string): string {
   const appUrl = process.env.APP_URL || "https://bba24tqeknn5rjnjom8k.containers.yandexcloud.net/";
   return `

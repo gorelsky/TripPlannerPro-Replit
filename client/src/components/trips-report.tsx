@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Download, Loader2, Search } from "lucide-react";
+import { Download, Loader2, Mail, Search } from "lucide-react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/auth-context";
 
 interface TripsReportData {
   periodStart: string;
@@ -24,11 +25,13 @@ interface TripsReportData {
 
 export function TripsReport() {
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
   const currentDate = new Date();
   const [periodStart, setPeriodStart] = useState(format(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1), "yyyy-MM-dd"));
   const [periodEnd, setPeriodEnd] = useState(format(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0), "yyyy-MM-dd"));
   const [isExporting, setIsExporting] = useState(false);
   const [search, setSearch] = useState("");
+  const [isNotifying, setIsNotifying] = useState(false);
   const isPeriodValid = Boolean(periodStart && periodEnd && periodStart <= periodEnd);
 
   const { data: report, isLoading, isError, error } = useQuery<TripsReportData>({
@@ -102,6 +105,27 @@ export function TripsReport() {
       setIsExporting(false);
     }
   };
+  const handleNotifyRegistry = async () => {
+    if (!report || !isPeriodValid) return;
+    const recipientCount = new Set([...report.withAllowance, ...report.withoutAllowance].map((trip) => trip.employee?.id).filter(Boolean)).size;
+    if (recipientCount === 0) {
+      toast({ title: "Нет адресатов", description: "В выбранном реестре нет сотрудников для уведомления.", variant: "destructive" });
+      return;
+    }
+    if (!window.confirm(`Отправить уведомление в чат и на email ${recipientCount} сотрудникам?`)) return;
+    setIsNotifying(true);
+    try {
+      const response = await fetch("/api/admin/trips-report/notify", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ startDate: periodStart, endDate: periodEnd }) });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Не удалось выполнить рассылку реестра");
+      toast({ title: "Рассылка завершена", description: `Получателей: ${data.recipients}. Чат: ${data.chatSent}, email: ${data.emailSent}. Ошибок: ${data.failed?.length || 0}.` });
+    } catch (error) {
+      toast({ title: "Ошибка рассылки", description: error instanceof Error ? error.message : "Не удалось выполнить рассылку", variant: "destructive" });
+    } finally {
+      setIsNotifying(false);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -125,7 +149,7 @@ export function TripsReport() {
                 <Input type="date" min={periodStart} value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} />
               </div>
 
-              <div className="flex items-end">
+              <div className="flex items-end gap-2">
                 <Button
                   onClick={handleExportReport}
                   disabled={!isPeriodValid || isExporting || (isLoading && !report)}
@@ -144,6 +168,12 @@ export function TripsReport() {
                     </>
                   )}
                 </Button>
+                {["admin", "coordinator"].includes(currentUser?.role || "") && (
+                  <Button variant="outline" onClick={handleNotifyRegistry} disabled={!report || !isPeriodValid || isLoading || isNotifying} className="w-full" data-testid="button-notify-registry">
+                    {isNotifying ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+                    Рассылка
+                  </Button>
+                )}
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium">Поиск в реестре</label>

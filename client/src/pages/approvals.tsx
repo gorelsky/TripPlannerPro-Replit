@@ -121,19 +121,21 @@ export default function Approvals() {
       const response = await apiRequest("POST", "/api/approvals/approve-planned-batch");
       return response.json() as Promise<{ updated: number }>;
     },
-    onSuccess: ({ updated }) => {
+    onSuccess: ({ updated, failed = [] }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
       queryClient.invalidateQueries({ queryKey: ["/api/approvals/pending", currentUser?.id] });
       queryClient.invalidateQueries({ queryKey: [`/api/stats/dashboard/${currentUser?.id}`] });
       toast({
         title: "Плановые командировки подтверждены",
-        description: `Утверждено заявок: ${updated}.`,
+        description: failed.length > 0
+          ? `Утверждено: ${updated}. Не обработано: ${failed.length}.`
+          : `Утверждено заявок: ${updated}.`,
       });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Ошибка",
-        description: "Не удалось пакетно подтвердить плановые командировки",
+        description: error.message || "Не удалось пакетно подтвердить плановые командировки",
         variant: "destructive",
       });
     },

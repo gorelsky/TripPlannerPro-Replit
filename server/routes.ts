@@ -1485,29 +1485,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : [];
       });
 
+      const failedTrips: Array<{ tripId: string; error: string }> = [];
+      let updatedCount = 0;
       for (const { trip, approval } of plannedTripsToApprove) {
-        await storage.updateTrip(trip.id, { status: "planned" });
-        await storage.updateApproval(approval.id, {
-          status: "approved",
-          comment: "Пакетно подтверждено генеральным директором",
-        });
+        try {
+          await storage.updateTrip(trip.id, { status: "planned" });
+          await storage.updateApproval(approval.id, {
+            status: "approved",
+            comment: "Пакетно подтверждено генеральным директором",
+          });
+          updatedCount += 1;
+        } catch (error: any) {
+          const message = error?.message || "неизвестная ошибка базы данных";
+          console.error(`[APPROVALS] Batch approval failed for trip ${trip.id}:`, error);
+          failedTrips.push({ tripId: trip.id, error: message });
+        }
       }
 
-      if (plannedTripsToApprove.length > 0) {
-        const recipients = (await storage.getAllUsers()).filter((user) =>
-          ["admin", "coordinator"].includes(user.role || "") && user.id !== approver.id,
-        );
-        const months = Array.from(new Set(plannedTripsToApprove.map(({ trip }) => trip.startDate.slice(0, 7))))
-          .sort()
-          .join(", ");
-        await Promise.all(recipients.map((recipient) => storage.saveChatMessage({
-          fromUserId: approver.id,
-          toUserId: recipient.id,
-          message: `Генеральный директор пакетно подтвердил плановые командировки (${plannedTripsToApprove.length}) за период ${months}. Можно сформировать и выгрузить утвержденный реестр.`,
-        })));
+      if (updatedCount > 0) {
+        try {
+          const recipients = (await storage.getAllUsers()).filter((user) =>
+            ["admin", "coordinator"].includes(user.role || "") && user.id !== approver.id,
+          );
+          const months = Array.from(new Set(plannedTripsToApprove.map(({ trip }) => trip.startDate.slice(0, 7))))
+            .sort()
+            .join(", ");
+          await Promise.all(recipients.map((recipient) => storage.saveChatMessage({
+            fromUserId: approver.id,
+            toUserId: recipient.id,
+            message: `Генеральный директор пакетно подтвердил плановые командировки (${updatedCount}) за период ${months}. Можно сформировать и выгрузить утвержденный реестр.`,
+          })));
+        } catch (error) {
+          console.error("[APPROVALS] Batch approval notification failed:", error);
+        }
       }
 
-      res.json({ updated: plannedTripsToApprove.length });
+      if (updatedCount === 0 && failedTrips.length > 0) {
+        throw new Error(`Не удалось утвердить заявки: ${failedTrips[0].error}`);
+      }
+      res.json({ updated: updatedCount, failed: failedTrips });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Не удалось подтвердить плановые командировки" });
     }

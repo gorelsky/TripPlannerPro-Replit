@@ -1805,7 +1805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const sender = await storage.getUser(req.session.userId);
       const senderRole = normalizeRole(sender?.role);
-      if (!sender || !["admin", "coordinator"].includes(senderRole))
+      if (!sender || !["admin", "coordinator"].includes(senderRole)) {
         return res.status(403).json({ error: "Рассылка реестра доступна только администратору и координатору" });
       }
       const period = getReportDateRange(req.body || {});

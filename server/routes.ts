@@ -1804,7 +1804,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const sender = await storage.getUser(req.session.userId);
-      if (!sender || !["admin", "coordinator"].includes(sender.role || "")) {
+      const senderRole = normalizeRole(sender?.role);
+      if (!sender || !["admin", "coordinator"].includes(senderRole))
         return res.status(403).json({ error: "Рассылка реестра доступна только администратору и координатору" });
       }
       const period = getReportDateRange(req.body || {});
@@ -1831,15 +1832,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (error: any) {
           failed.push({ fullName: user.fullName, email: user.email, error: `Чат: ${error?.message || "ошибка отправки"}` });
         }
-        const delivered = await sendEmail({
-          to: user.email,
-          subject: "Командировка согласована Генеральным директором",
-          html: generateRegistryApprovalNotificationEmail(user.fullName, trips.map((trip) => ({
-            startDate: trip.startDate, endDate: trip.endDate, route: trip.route?.path || "", tripType: trip.tripType,
-          }))),
-        });
-        if (delivered) emailSent += 1;
-        else failed.push({ fullName: user.fullName, email: user.email, error: "Email: SMTP не подтвердил доставку" });
+        try {
+          const delivered = await sendEmail({
+            to: user.email,
+            subject: "Командировка согласована Генеральным директором",
+            html: generateRegistryApprovalNotificationEmail(user.fullName, trips.map((trip) => ({
+              startDate: trip.startDate, endDate: trip.endDate, route: trip.route?.path || "", tripType: trip.tripType,
+            }))),
+          });
+          if (delivered) emailSent += 1;
+          else failed.push({ fullName: user.fullName, email: user.email, error: "Email: SMTP не подтвердил доставку" });
+        } catch (error: any) {
+          failed.push({ fullName: user.fullName, email: user.email, error: `Email: ${error?.message || "ошибка отправки"}` });
+        }
       }
       res.json({ recipients: grouped.size, chatSent, emailSent, failed });
     } catch (error: any) {
@@ -3131,11 +3136,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  function normalizeRole(role: unknown): string {
+    return typeof role === "string" ? role.trim().toLowerCase() : "";
+  }
+
   async function requireRegistryAccess(req: any, res: any, next: any) {
     try {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const user = await storage.getUser(req.session.userId);
-      if (!user || !["admin", "coordinator", "accountant", "hr_manager", "hr_director"].includes(user.role || "")) {
+      if (!user || !["admin", "coordinator", "accountant", "hr_manager", "hr_director"].includes(normalizeRole(user.role))) {
         return res.status(403).json({ error: "Registry is available only to administrators, coordinators and accounting" });
       }
       next();

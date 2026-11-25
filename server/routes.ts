@@ -1487,14 +1487,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
       const approver = await storage.getUser(req.session.userId);
-      if (!approver || approver.role !== "ceo") {
-        return res.status(403).json({ error: "Пакетное подтверждение плановых командировок доступно только генеральному директору" });
+      if (!approver || !["ceo", "admin"].includes(approver.role || "")) {
+        return res.status(403).json({ error: "Пакетное подтверждение доступно генеральному директору или администратору" });
       }
 
-      const approvalTrips = await storage.getTripsForApproval(approver.id);
+      const ceo = approver.role === "ceo" ? approver : await getRequiredWorkflowReviewer("ceo");
+      const approvalTrips = await storage.getTripsForApproval(ceo.id);
       const plannedTripsToApprove = approvalTrips.flatMap((trip) => {
         const pendingApproval = trip.approvals?.find(
-          (approval) => approval.approverId === approver.id && approval.status === "pending",
+          (approval) => approval.approverId === ceo.id && approval.status === "pending",
         );
         return trip.tripType === "planned" && trip.status === "awaiting_ceo_signature" && pendingApproval
           ? [{ trip, approval: pendingApproval }]
@@ -1508,7 +1509,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.updateTrip(trip.id, { status: "planned" });
           await storage.updateApproval(approval.id, {
             status: "approved",
-            comment: "Пакетно подтверждено генеральным директором",
+            comment: approver.role === "admin"
+              ? "Пакетно подтверждено администратором от имени генерального директора"
+              : "Пакетно подтверждено генеральным директором",
           });
           updatedCount += 1;
         } catch (error: any) {
@@ -1529,7 +1532,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await Promise.all(recipients.map((recipient) => storage.saveChatMessage({
             fromUserId: approver.id,
             toUserId: recipient.id,
-            message: `Генеральный директор пакетно подтвердил плановые командировки (${updatedCount}) за период ${months}. Можно сформировать и выгрузить утвержденный реестр.`,
+            message: approver.role === "admin"
+              ? `Администратор от имени генерального директора пакетно подтвердил плановые командировки (${updatedCount}) за период ${months}. Можно сформировать и выгрузить утвержденный реестр.`
+              : `Генеральный директор пакетно подтвердил плановые командировки (${updatedCount}) за период ${months}. Можно сформировать и выгрузить утвержденный реестр.`,
           })));
         } catch (error) {
           console.error("[APPROVALS] Batch approval notification failed:", error);

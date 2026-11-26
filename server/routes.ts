@@ -714,14 +714,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (user.role === "territorial_manager") {
       const cities = await storage.getAllCities();
       const cityById = new Map(cities.map((city) => [city.id, city]));
-      const userRegion = user.homeCityId ? cityById.get(user.homeCityId)?.region?.trim().toLowerCase() : undefined;
+      const subordinateRegions = allUsers
+        .filter((candidate) => candidate.managerId === user.id && candidate.homeCityId)
+        .map((candidate) => cityById.get(candidate.homeCityId!)?.region?.trim().toLowerCase())
+        .filter((region): region is string => Boolean(region));
+      const userRegion = user.homeCityId
+        ? cityById.get(user.homeCityId)?.region?.trim().toLowerCase()
+        : undefined;
+      const regions = new Set([userRegion, ...subordinateRegions].filter((region): region is string => Boolean(region)));
 
-      if (userRegion) {
+      if (regions.size > 0) {
         for (const candidate of allUsers) {
           const candidateRegion = candidate.homeCityId
             ? cityById.get(candidate.homeCityId)?.region?.trim().toLowerCase()
             : undefined;
-          if (candidateRegion === userRegion) allowedEmployeeIds.add(candidate.id);
+          if (candidateRegion && regions.has(candidateRegion)) allowedEmployeeIds.add(candidate.id);
         }
       } else {
         for (const candidate of allUsers) {

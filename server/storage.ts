@@ -208,7 +208,8 @@ export class PostgresStorage implements IStorage {
       this.tripMemoColumnsReady = db.execute(sql`
         ALTER TABLE trip_planner_trips
           ADD COLUMN IF NOT EXISTS source_trip_id varchar,
-          ADD COLUMN IF NOT EXISTS memo_type text
+          ADD COLUMN IF NOT EXISTS memo_type text,
+          ADD COLUMN IF NOT EXISTS memo_data jsonb
       `).then(() => undefined);
     }
     return this.tripMemoColumnsReady;

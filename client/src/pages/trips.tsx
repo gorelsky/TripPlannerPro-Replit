@@ -54,7 +54,7 @@ import { format, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
 import { statusLabels, getStatusColor } from "@/lib/status-utils";
 import { formatDateShort, getTripDuration } from "@/lib/date-utils";
-import type { TripStatus, City, User, InsertTrip, TripWithDetails, Route, DailyAllowance, TransportType, Holiday, TripType, TripMemoType } from "@shared/schema";
+import type { TripStatus, City, User, InsertTrip, TripWithDetails, Route, DailyAllowance, TransportType, Holiday, TripType, TripMemoType, TripMemoDraft } from "@shared/schema";
 
 type MemoKind = "unplanned" | "cancel" | "reschedule" | "change";
 type UnplannedScenario = "new" | "reschedule";
@@ -101,6 +101,7 @@ export default function Trips() {
   const [memoDialog, setMemoDialog] = useState<{ trip: TripWithDetails; kind: MemoKind } | null>(null);
   const [memoFields, setMemoFields] = useState({ reason: "", place: "", travelCost: "", accommodationCost: "", otherCost: "", newStartDate: "", newEndDate: "", newPurpose: "" });
   const [isGeneratingMemo, setIsGeneratingMemo] = useState(false);
+  const [isSavingMemo, setIsSavingMemo] = useState(false);
   const [unplannedScenario, setUnplannedScenario] = useState<UnplannedScenario>("new");
   const [sourceTripId, setSourceTripId] = useState("");
 
@@ -349,17 +350,32 @@ export default function Trips() {
     .sort((first, second) => first.startDate.localeCompare(second.startDate));
 
   const openMemoDialog = (trip: TripWithDetails, kind: MemoKind, initialReason?: string) => {
+    const saved = (trip.memoData || {}) as TripMemoDraft;
     setMemoFields({
-      reason: (initialReason ?? trip.unplannedReason) || "",
-      place: "",
-      travelCost: "",
-      accommodationCost: "",
-      otherCost: "",
-      newStartDate: kind === "reschedule" ? trip.startDate : "",
-      newEndDate: kind === "reschedule" ? trip.endDate : "",
-      newPurpose: "",
+      reason: initialReason ?? saved.reason ?? trip.unplannedReason ?? "",
+      place: saved.place ?? "",
+      travelCost: saved.travelCost ?? "",
+      accommodationCost: saved.accommodationCost ?? "",
+      otherCost: saved.otherCost ?? "",
+      newStartDate: kind === "reschedule" ? (saved.newStartDate || trip.startDate) : (saved.newStartDate ?? ""),
+      newEndDate: kind === "reschedule" ? (saved.newEndDate || trip.endDate) : (saved.newEndDate ?? ""),
+      newPurpose: saved.newPurpose ?? "",
     });
     setMemoDialog({ trip, kind });
+  };
+
+  const saveMemoDraft = async () => {
+    if (!memoDialog) return;
+    setIsSavingMemo(true);
+    try {
+      await apiRequest("POST", `/api/trips/${memoDialog.trip.id}/memo-draft`, { fields: memoFields });
+      await queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({ title: "Данные СЗ сохранены", description: "При повторном открытии они будут подставлены автоматически." });
+    } catch (error: any) {
+      toast({ title: "Не удалось сохранить данные СЗ", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSavingMemo(false);
+    }
   };
 
   const startReschedule = (trip: TripWithDetails) => {
@@ -1120,7 +1136,10 @@ export default function Trips() {
           )}
           <DialogFooter className="flex-col gap-2 sm:flex-row">
             <Button className="w-full sm:w-auto" variant="outline" onClick={() => setMemoDialog(null)}>Отмена</Button>
-            <Button className="w-full sm:w-auto" onClick={downloadMemo} disabled={isGeneratingMemo}>
+            <Button className="w-full sm:w-auto" variant="secondary" onClick={saveMemoDraft} disabled={isSavingMemo || isGeneratingMemo}>
+              {isSavingMemo ? "Сохранение..." : "Сохранить данные"}
+            </Button>
+            <Button className="w-full sm:w-auto" onClick={downloadMemo} disabled={isGeneratingMemo || isSavingMemo}>
               <FileText /> {isGeneratingMemo ? "Формирование..." : "Скачать Word"}
             </Button>
           </DialogFooter>

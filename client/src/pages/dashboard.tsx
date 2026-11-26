@@ -8,7 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, Users, Building2, CheckSquare, TrendingUp, Clock, X, MessageCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import type { TripWithDetails, TransportType, User } from "@shared/schema";
+import type { TripWithDetails, TransportType, User, City } from "@shared/schema";
+import { filterVisibleTrips } from "@/lib/trip-visibility";
 
 const transportLabels: Record<TransportType, string> = {
   car: "Авто",
@@ -35,6 +36,11 @@ export default function Dashboard() {
 
   const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
     queryKey: ["/api/users"],
+    enabled: !!user,
+  });
+
+  const { data: cities = [] } = useQuery<City[]>({
+    queryKey: ["/api/cities"],
     enabled: !!user,
   });
 
@@ -107,7 +113,7 @@ export default function Dashboard() {
   }, [trips, tripsLoading, user]);
 
   // API уже возвращает только командировки, разрешённые текущей ролью и областью видимости.
-  const filteredTrips = trips;
+  const filteredTrips = filterVisibleTrips(user, users, cities, trips);
 
   const sortTripsByStartDate = (first: TripWithDetails, second: TripWithDetails) =>
     first.startDate.localeCompare(second.startDate) || first.endDate.localeCompare(second.endDate);
@@ -153,22 +159,22 @@ export default function Dashboard() {
   let modalTitle = "";
 
   if (selectedStats === "all") {
-    displayTrips = trips;
+    displayTrips = filteredTrips;
     modalTitle = `Всего командировок (${stats?.totalTrips || 0})`;
   } else if (selectedStats === "pending") {
     if (isManager) {
       displayTrips = approvalTrips;
       modalTitle = `Требуют согласования (${stats?.pendingApprovals || 0})`;
     } else {
-      displayTrips = trips.filter(t => t.status === "pending");
+      displayTrips = filteredTrips.filter(t => t.status === "pending");
       modalTitle = `На согласовании (${stats?.pendingTrips || 0})`;
     }
   } else if (selectedStats === "approved") {
-    displayTrips = trips.filter(t => confirmedStatuses.includes(t.status));
+    displayTrips = filteredTrips.filter(t => confirmedStatuses.includes(t.status));
     modalTitle = `Утверждено (${stats?.approvedTrips || 0})`;
   } else if (selectedStats === "active") {
     const today = new Date();
-    displayTrips = trips.filter(t => {
+    displayTrips = filteredTrips.filter(t => {
       const startDate = new Date(t.startDate);
       const endDate = new Date(t.endDate);
       return confirmedStatuses.includes(t.status) && startDate <= today && endDate >= today;
@@ -183,13 +189,14 @@ export default function Dashboard() {
   );
 
   // User's own pending trips (for everyone)
-  const myPendingTrips = trips.filter(t => t.employeeId === user?.id && pendingStatuses.includes(t.status));
+  const myPendingTrips = filteredTrips.filter(t => t.employeeId === user?.id && pendingStatuses.includes(t.status));
 
   // User's own rejected trips (for everyone, including managers)
-  const myRejectedTrips = trips.filter(t => t.employeeId === user?.id && t.status === "rejected");
+  const myRejectedTrips = filteredTrips.filter(t => t.employeeId === user?.id && t.status === "rejected");
 
   const todayStr = new Date().toISOString().split("T")[0];
   const usersById = new Map(users.map((u) => [u.id, u]));
+  const scopedTrips = filteredTrips;
   const managerPlanMap = new Map<string, {
     id: string;
     name: string;
@@ -204,7 +211,7 @@ export default function Dashboard() {
     nextTripDate: string | null;
   }>();
 
-  trips
+  scopedTrips
     .filter((trip) => trip.status !== "rejected" && trip.endDate >= todayStr)
     .forEach((trip) => {
       const employee = trip.employee || usersById.get(trip.employeeId);

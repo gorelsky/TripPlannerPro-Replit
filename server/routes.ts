@@ -567,7 +567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const elevatedTripViewerRoles = new Set(["admin", "ceo", "deputy_ceo"]);
   const allTripsViewerRoles = new Set(["admin", "ceo", "deputy_ceo", "coordinator"]);
-  const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director", "hr_director"]);
+  const departmentLeaderRoles = new Set(["marketing_director", "sales_director", "commerce_director", "commercial_manager", "hr_director"]);
   const requiredWorkflowRoles = new Set(["coordinator", "deputy_ceo", "ceo"]);
   const defaultWorkflowDeputyCeoName = "Горельский Евгений Александрович";
 

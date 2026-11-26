@@ -3406,6 +3406,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/trips/:id/memo-draft", async (req, res) => {
+    try {
+      if (!req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+
+      const currentUser = await storage.getUser(req.session.userId);
+      const trip = await storage.getTripWithDetails(req.params.id);
+      if (!currentUser || !trip) return res.status(404).json({ error: "Trip not found" });
+
+      const canSave = currentUser.role === "admin" || currentUser.role === "coordinator"
+        || currentUser.id === trip.employeeId || currentUser.id === trip.employee.managerId;
+      if (!canSave) return res.status(403).json({ error: "You do not have access to this trip" });
+
+      const fields = req.body?.fields;
+      if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+        return res.status(400).json({ error: "Некорректные данные служебной записки" });
+      }
+
+      const allowedKeys = ["reason", "place", "travelCost", "accommodationCost", "otherCost", "newStartDate", "newEndDate", "newPurpose"] as const;
+      const memoData = Object.fromEntries(allowedKeys.map((key) => [
+        key,
+        typeof fields[key] === "string" ? fields[key].trim() : "",
+      ]));
+      const updatedTrip = await storage.updateTrip(trip.id, { memoData });
+      res.json(updatedTrip);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Не удалось сохранить данные СЗ" });
+    }
+  });
+
   app.get("/api/chat/messages", async (req, res) => {
     try {
       if (!req.session.userId) {

@@ -76,11 +76,9 @@ export default function CalendarView() {
   const getHolidayName = (date: Date) =>
     holidaysList.find(h => h.date === format(date, "yyyy-MM-dd"))?.description || "Праздничный день";
 
-  const filteredEmployees = employees.filter(emp => {
-    if (!currentUser) return false;
-    if (["admin", "coordinator", "accountant", "hr_director", "ceo", "deputy_ceo"].includes(currentUser.role || "")) return true;
-    return emp.id === currentUser.id || emp.managerId === currentUser.id;
-  });
+  // Список сотрудников строится из командировок, уже отфильтрованных сервером.
+  const visibleEmployeeIds = new Set(trips.map((trip) => trip.employeeId));
+  const filteredEmployees = employees.filter((emp) => visibleEmployeeIds.has(emp.id));
 
   // ── Navigation ───────────────────────────────────────────────
   const goToPrevious = () => {

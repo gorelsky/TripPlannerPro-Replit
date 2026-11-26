@@ -708,13 +708,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const allTrips = await storage.getAllTrips();
     if (allTripsViewerRoles.has(user.role || "")) return allTrips;
 
+    const allUsers = await storage.getAllUsers();
     const allowedEmployeeIds = new Set([user.id]);
-    if (user.userType === "manager") {
-      const allUsers = await storage.getAllUsers();
-      for (const candidate of allUsers) {
-        if (candidate.managerId === user.id) allowedEmployeeIds.add(candidate.id);
-        if (departmentLeaderRoles.has(user.role || "") && user.department && candidate.department === user.department) {
-          allowedEmployeeIds.add(candidate.id);
+
+    if (user.role === "territorial_manager") {
+      const cities = await storage.getAllCities();
+      const cityById = new Map(cities.map((city) => [city.id, city]));
+      const userRegion = user.homeCityId ? cityById.get(user.homeCityId)?.region?.trim().toLowerCase() : undefined;
+
+      if (userRegion) {
+        for (const candidate of allUsers) {
+          const candidateRegion = candidate.homeCityId
+            ? cityById.get(candidate.homeCityId)?.region?.trim().toLowerCase()
+            : undefined;
+          if (candidateRegion === userRegion) allowedEmployeeIds.add(candidate.id);
+        }
+      } else {
+        for (const candidate of allUsers) {
+          if (candidate.managerId === user.id) allowedEmployeeIds.add(candidate.id);
+        }
+      }
+    } else if (departmentLeaderRoles.has(user.role || "") || user.userType === "manager") {
+      if (user.department) {
+        for (const candidate of allUsers) {
+          if (candidate.department === user.department) allowedEmployeeIds.add(candidate.id);
+        }
+      } else {
+        for (const candidate of allUsers) {
+          if (candidate.managerId === user.id) allowedEmployeeIds.add(candidate.id);
         }
       }
     }

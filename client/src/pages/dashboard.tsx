@@ -106,9 +106,8 @@ export default function Dashboard() {
     if (nearestTrip) setNearestTripNotice(nearestTrip);
   }, [trips, tripsLoading, user]);
 
-  const filteredTrips = canViewAllTrips
-    ? trips
-    : trips.filter((trip) => trip.employeeId === user?.id);
+  // API уже возвращает только командировки, разрешённые текущей ролью и областью видимости.
+  const filteredTrips = trips;
 
   const sortTripsByStartDate = (first: TripWithDetails, second: TripWithDetails) =>
     first.startDate.localeCompare(second.startDate) || first.endDate.localeCompare(second.endDate);

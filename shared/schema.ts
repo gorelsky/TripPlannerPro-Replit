@@ -39,6 +39,16 @@ export type TripStatus =
 export type TripType = "planned" | "unplanned";
 export type TripMemoType = "unplanned" | "reschedule";
 export type EmploymentStatus = "active" | "maternity_leave" | "dismissed";
+export type TripMemoDraft = {
+  reason?: string;
+  place?: string;
+  travelCost?: string;
+  accommodationCost?: string;
+  otherCost?: string;
+  newStartDate?: string;
+  newEndDate?: string;
+  newPurpose?: string;
+};
 
 // Пользователи/Сотрудники
 export const users = pgTable("trip_planner_users", {
@@ -85,6 +95,7 @@ export const trips = pgTable("trip_planner_trips", {
   unplannedReason: text("unplanned_reason"),
   sourceTripId: varchar("source_trip_id"), // Исходная поездка при переносе
   memoType: text("memo_type").$type<TripMemoType>(), // Какая СЗ относится к внеплановой поездке
+  memoData: jsonb("memo_data").$type<TripMemoDraft>(), // Сохранённые поля служебной записки
   status: text("status").notNull().$type<TripStatus>().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

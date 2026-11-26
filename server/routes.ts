@@ -735,7 +735,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (candidate.managerId === user.id) allowedEmployeeIds.add(candidate.id);
         }
       }
-    } else if (departmentLeaderRoles.has(user.role || "") || user.userType === "manager") {
+    } else if (departmentLeaderRoles.has(user.role || "") || user.role === "manager") {
       if (user.department) {
         for (const candidate of allUsers) {
           if (candidate.department === user.department) allowedEmployeeIds.add(candidate.id);

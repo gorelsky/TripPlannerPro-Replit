@@ -333,7 +333,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <Card>
+      {(isManager || user?.role === "manager") && <Card>
         <CardHeader className="pb-3 md:pb-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -394,6 +394,8 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      </Card>}
 
       {nearestTripNotice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setNearestTripNotice(null)}>

@@ -39,7 +39,8 @@ import { getStatusColor, statusLabels } from "@/lib/status-utils";
 import { roleLabels } from "@/lib/role-utils";
 import { formatDateShort } from "@/lib/date-utils";
 import { useAuth } from "@/contexts/auth-context";
-import type { TripWithDetails, User, TransportType, Holiday } from "@shared/schema";
+import type { TripWithDetails, User, TransportType, Holiday, City } from "@shared/schema";
+import { filterVisibleTrips, getVisibleEmployeeIds } from "@/lib/trip-visibility";
 
 type ViewType = "month" | "week" | "quarter";
 
@@ -65,6 +66,9 @@ export default function CalendarView() {
   const { data: employees = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
   });
+  const { data: cities = [] } = useQuery<City[]>({
+    queryKey: ["/api/cities"],
+  });
   const { data: holidaysList = [] } = useQuery<Holiday[]>({
     queryKey: ["/api/holidays"],
   });
@@ -76,8 +80,9 @@ export default function CalendarView() {
   const getHolidayName = (date: Date) =>
     holidaysList.find(h => h.date === format(date, "yyyy-MM-dd"))?.description || "Праздничный день";
 
-  // Список сотрудников строится из командировок, уже отфильтрованных сервером.
-  const visibleEmployeeIds = new Set(trips.map((trip) => trip.employeeId));
+  // Дополнительно ограничиваем календарь по роли, даже если старый backend вернул лишние записи.
+  const scopedTrips = filterVisibleTrips(currentUser, employees, cities, trips);
+  const visibleEmployeeIds = getVisibleEmployeeIds(currentUser, employees, cities);
   const filteredEmployees = employees.filter((emp) => visibleEmployeeIds.has(emp.id));
 
   // ── Navigation ───────────────────────────────────────────────
@@ -112,7 +117,7 @@ export default function CalendarView() {
   // ── Helpers ───────────────────────────────────────────────────
   const getTripsForDate = (date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
-    return trips.filter(trip => {
+    return scopedTrips.filter(trip => {
       const matchesEmployee = employeeFilter === "all" || trip.employeeId === employeeFilter;
       return matchesEmployee && dateStr >= trip.startDate && dateStr <= trip.endDate;
     });
